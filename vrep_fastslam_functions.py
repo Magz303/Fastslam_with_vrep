@@ -137,7 +137,7 @@ def calculate_measurement_jacobian(X,mu): # should I really use dtheta?
 
     # Jacobian should cover all particles 3X3XM. Now it is 15X15X3
     # I have 1X5, 1X5, ...
-    # I want 1X1X5
+    # I want 1X1X5, 1X1X5,... thereafter concatenate
     dhr_dx2 = dhr_dx.reshape(1,1,M)
     dhr_dy2 = dhr_dy.reshape(1,1,M)
     dhr_dtheta2 = dhr_dtheta.reshape(1,1,M)    
@@ -149,7 +149,6 @@ def calculate_measurement_jacobian(X,mu): # should I really use dtheta?
     H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0)
     H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0)
     H = np.concatenate((H1,H2,H3), axis=1)
-    #H = np.array([[dhr_dx, dhr_dy, dhr_dtheta],[dhtheta_dx, dhtheta_dy, dhtheta_dtheta],[0, 0, 0]])
     return H
 
 
