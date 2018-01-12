@@ -38,6 +38,11 @@ clientID=vrep.simxStart('127.0.0.1', 19999, True, True, 5000, 5) # Connect to V-
 if clientID!=-1:
     print ('Connected to remote API server')
 
+# Stop-Start simulation of robot
+#error_code=vrep.simxStopSimulation(clientID,vrep.simx_opmode_oneshot)
+#time.sleep(1) # wait for sim to stop
+#error_code = vrep.simxStartSimulation(clientID,vrep.simx_opmode_oneshot)
+
 # Get Vrep scene object handles for input and output of information
 error_code, h_motor_left = vrep.simxGetObjectHandle(clientID, 'motor_front_left', vrep.simx_opmode_oneshot_wait)
 error_code, h_motor_right = vrep.simxGetObjectHandle(clientID, 'motor_front_right', vrep.simx_opmode_oneshot_wait)

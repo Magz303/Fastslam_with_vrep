@@ -129,12 +129,27 @@ def calculate_measurement_jacobian(X,mu): # should I really use dtheta?
     dhr_dtheta = np.zeros((1,M))
     
     # angle linearization
-    dhtheta_dx = (Xx-mux)/ q
+    dhtheta_dx = (Xx-mux)/ q #1X5
     dhtheta_dy = -(Xy-muy)/ q
     dhtheta_dtheta = -1*np.ones((1,M))
     
-    # Jacobian should cover all particles 3X3XM. Now it is
-    H = np.array([[dhr_dx, dhr_dy, dhr_dtheta],[dhtheta_dx, dhtheta_dy, dhtheta_dtheta],[0, 0, 0]])
+    dzero = np.zeros((1,1,M))
+
+    # Jacobian should cover all particles 3X3XM. Now it is 15X15X3
+    # I have 1X5, 1X5, ...
+    # I want 1X1X5
+    dhr_dx2 = dhr_dx.reshape(1,1,M)
+    dhr_dy2 = dhr_dy.reshape(1,1,M)
+    dhr_dtheta2 = dhr_dtheta.reshape(1,1,M)    
+    dhtheta_dx2 = dhtheta_dx.reshape(1,1,M)
+    dhtheta_dy2 = dhtheta_dy.reshape(1,1,M)
+    dhtheta_dtheta = dhtheta_dtheta.reshape(1,1,M)
+    dzero2 = dzero.reshape(1,1,M)
+    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=0)
+    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0)
+    H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0)
+    H = np.concatenate((H1,H2,H3), axis=1)
+    #H = np.array([[dhr_dx, dhr_dy, dhr_dtheta],[dhtheta_dx, dhtheta_dy, dhtheta_dtheta],[0, 0, 0]])
     return H
 
 
@@ -150,8 +165,8 @@ def observation_model(X,W,j,Q):
     # Outputs:  
     #           z           2XM observation function for range-bearing measurement, [r, theta]'
     M = np.size(X[0,:])     # Number of particles in particle set    
-    Featx = np.ones((1,M)) * W[0,j] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
-    Featy = np.ones((1,M)) * W[1,j] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
+    Featx = np.ones((1,M)) * W[0,0] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
+    Featy = np.ones((1,M)) * W[1,0] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
     Xx = X[0,:] # Extract the x position of all particles
     Xy = X[1,:] # Extract the y position of all particles
     Xtheta = X[2,:] # Extract the theta angle of all particles
