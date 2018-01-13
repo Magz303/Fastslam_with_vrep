@@ -122,8 +122,10 @@ X = np.zeros((3,M)) # Set of particles
 # observed_objects_pos = np.zeros((2,M,1)) # observed object position in time t
 mu = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_init = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
+mu_new = np.zeros((1,2,M))
 Sigma = np.zeros((1,M,3,3)) # feature position covariance related to each particle and feature
 Sigma_init = np.zeros((1,M,3,3)) # feature position covariance related to each particle and feature
+Sigma_new = np.zeros((1,M,3,3))
 
 # Initialize process noise acovariance matricies
 stddev_R = 1
@@ -136,6 +138,9 @@ QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0)
 
 # Initialize number of observed objects
 observed_objects = []
+
+# Initialize identify matrix
+I = np.repeat(np.eye(3)[np.newaxis, :, : ], M, axis=0)
 
 # Initialize counter
 m = 0 # counter for main loop
@@ -253,7 +258,7 @@ while (time.time() - starttime < totalsimtime):
                 if j == 0:
                     Sigma = Sigma_init #MX3X3
                 else:
-                    Sigma = np.concatenate((Sigma,Sigma_init),axis=3) # NXMX3X3              
+                    Sigma = np.concatenate((Sigma,Sigma_init),axis=0) # NXMX3X3              
                 
                 # default importance weights
                 weights = 1/M*np.ones((1,M)) # 1XM
@@ -273,24 +278,66 @@ while (time.time() - starttime < totalsimtime):
                 H_T = np.transpose(H,(0,2,1)) # MX3X3     
                 
                 # Measurement covariance (not the same as Qt measurement covariance noise)
-                Q = H * Sigma[j,:,:,:] * H_T + QtS # MX3X3
+                Q = H @ Sigma[j,:,:,:] @ H_T + QtS # MX3X3
                 
                 # Inverse of measurement covariance
                 Qinv = np.linalg.inv(Q) # MX3X3
                 
                 # Calculate Kalman gain
-                K = Sigma[j,:,:,:] * H_T * Qinv
+                K = Sigma[j,:,:,:] @ H_T @ Qinv # MX3X3
                 
-                # update mean
+                # measurement error # 2XM
+                zerror = (z-zhat) # 2XM
+                
+                # Add extra row to measurement error for Kalman gain multiplication
+                zerror = np.concatenate((z,np.zeros((1,M))),axis=0) # 3XM, but I want it MX3X1
+                zerror = np.transpose(zerror.reshape(3,5,1),(1,0,2)) # MX3X1
+                
+                # update mean. CONSIDER: revise dimensions to make this simpler and also mu_new
+                mu[j,:,:] = mu[j,:,:] + (K @ zerror).T[:,:2,:] # NX2XM # think about changing to NXMX2X1
+                
+                # update covariance
+                Sigma[j,:,:,:] = (I - K@H)@Sigma[j,:,:,:]# NXMX3X3
+                
+                # importance factor amplitude
+                ata = 1/np.sqrt(np.pi*2*Q) # MX3X3
+                
+                # Transpose zerror
+                zerrorT = np.transpose(zerror,(0,2,1))
+                
+                # distance
+                nu = -1/2*(zerrorT) @ Qinv @ zerror #MX5X1
+                
+                # importance factor
+                weights = ata*np.exp(nu)
                 
                 
-        # for the other features that were not detected  
-        else:   
+                
+        # if no feature was detected or for the features that were not detected 
+        else:  
+            # mean and covariance the same as earlier time step
             mu = mu
             Sigma = Sigma
-            # mean and covariance the same
-            
+                       
         # resample
+# % This function performs systematic re-sampling
+#% Inputs:   
+#%           S_bar(t):       4XM
+#% Outputs:
+#%           S(t):           4XM
+#function S = systematic_resample(S_bar)
+#
+#cdf = cumsum(S_bar(4,:));
+#M = size(S_bar,2);
+#S = zeros(size(S_bar));
+#r_0 = rand / M;
+#for m = 1 : M
+#    i = find(cdf >= r_0,1,'first');
+#    S(1:3,m) = S_bar(1:3,i);
+#    r_0 = r_0 + 1/M;
+#end
+#S(4,:) = 1/M*ones(size(S_bar(4,:)));
+#end       
         
         # test of ploting the course using drawnow?
         

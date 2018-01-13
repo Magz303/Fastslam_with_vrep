@@ -76,7 +76,8 @@ def calculate_measurement_jacobian(X,mu,j):
     dhtheta_dy = -(Xy-muy)/ q
     dhtheta_dtheta = -1*np.ones((1,M))
     
-    dzero = np.zeros((1,1,M))
+    tol = 1e-6
+    dzero = np.ones((1,1,M))*tol
 
     # Jacobian should cover all particles 3X3XM. Now it is 15X15X3
     # I have 1X5, 1X5, ...
