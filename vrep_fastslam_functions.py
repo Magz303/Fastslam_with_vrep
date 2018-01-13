@@ -72,9 +72,10 @@ def associate_known(Sbar, z, W, Lambda_psi, Q, known_association):
 
     
 
-
+# USED IN SIM!
 def init_mean_from_z(X, z): # see p.320
-    # This function should initialize the mean location of the feature in world coordinates
+    # This function should initialize the mean location mu of the feature in world coordinates
+    # based on a range and angle z related to the particle set X
     # The bearing lies in the interval [-pi,pi)
     # Inputs:    
     #           X           3XM previous particle set representing the states and the weights [x,y,theta]
@@ -106,8 +107,12 @@ def test_init_mean():
 
 #test_init_mean()
     
-def calculate_measurement_jacobian(X,mu): # should I really use dtheta?
-    # This function is the implementation of the H function, linearised observation model
+# USED IN SIM!    
+def calculate_measurement_jacobian(X,mu,j): 
+    # This function calculates the jacobian of the observation model for a given
+    # feature and the particle set. The Jacobian is used
+    # later to obtain the measurement covariance matrix Sigma = HxQxH.T  
+    # for a given feature and the particle set
     # Inputs:
     #           X(t)    3XM estimated states [x,y,theta]'   
     #           mu(t)   2XMXN observed mean position of features [x,y]'       
@@ -152,10 +157,11 @@ def calculate_measurement_jacobian(X,mu): # should I really use dtheta?
     return H
 
 
-    
+# USED IN SIM!    
 def observation_model(X,W,j,Q):
-    # This function implements the observation model
-    # The bearing lies in the interval [-pi,pi)
+    # This function implements the observation model and calculates the range and angle z for 
+    # a given feature j in [x,y] coordinates W and particle set X
+    # Note: The bearing theta lies in the interval [-pi,pi) in relation to the particle set X
     # Inputs:
     #           X           3XM previous particle set representing the states and the weights [x,y,theta]'
     #           W           2XN coordinates of the features in x,y in tth time 
@@ -194,8 +200,10 @@ def test_observation_model():
 
 #test_observation_model()
 
+# USED IN SIM!
 def sample_pose(X, v, w, R, delta_t):
-    # This function perform the prediction step / proposal distribution
+    # This function perform the prediction step / proposal distribution for the particle set X
+    # based on the odometry speed and angular frequency as well as the process noise R
     # Inputs:
     #           X(t-1)              3XM previous time particle set representing the states [x,y,theta]'
     #           v(t)                1X1 translational velocity of the robot in the tth time step
@@ -237,10 +245,12 @@ def test_sample_pose():
     print('Xbar', Xbar)
     print('Xbar dimension: ', Xbar.shape)
 
-#test_sample_pose()      
-
+#test_sample_pose()    
+    
+# USED IN SIM!
 def calculate_odometry(delta_angle_R, delta_angle_L, B, R_R, R_L, delta_t, CALIB_ODOM):
-    #  This function calculates the odometry information
+    #  This function calculates translational speed and angular frequency w of the robot provided
+    # from the odometry information of the robot wheel motors
     #  Inputs:
     #       delta_angle_R(t): 1X1 angle difference for the left wheel in the tth time step
     #       delta_angle_L(t): 1X1 angle difference for the right wheel in the tth time step
@@ -282,9 +292,11 @@ def test_calculate_odometry():
     print('velocity is', v)
     print('angular velocity is', w)
     
-
+# USED IN SIM!
 def predict_motion_xytheta(x, y, theta, v, w, delta_t):
-    # This function performs a prediction step without diffusion and without weights
+    # This function performs a prediction step without diffusion and without weights, i.e.
+    # estimates the next time increment position of the robot based on the robot position
+    # and translational velocity and angular frequency
     # Inputs:
     #           x(t-1)             1X1 previous state x-direction
     #           y(t-1)             1X1 previous state y-direction
@@ -309,101 +321,101 @@ def predict_motion_xytheta(x, y, theta, v, w, delta_t):
 ########
     # Not used
     
-def observation_model_particle(S,W,j):
-    # This function implements the observation model, might need modification as S contains landmarks as well!
-    # The bearing lies in the interval [-pi,pi)
-    # Inputs:
-    #           S           4XM previous particle set representing the states and the weights [x,y,theta, weights]'
-    #           W           2XN coordinates of the features in x,y in tth time 
-    #           j           1X1 index of the feature being matched to the measurement observation
-    # Outputs:  
-    #           h           2XM observation function for range-bearing measurement, [r, theta]'
-    M = np.size(S[0,:])     # Number of particles in particle set    
-    Featx = np.ones((1,M)) * W[0,j] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
-    Featy = np.ones((1,M)) * W[1,j] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
-    Sx = S[0,:] # Extract the x position of all particles
-    Sy = S[1,:] # Extract the y position of all particles
-    Stheta = S[2,:] # Extract the theta angle of all particles
-    r = np.sqrt((Featx - Sx)**2 +(Featy - Sy)**2) # range to feature for each particle
-    theta = np.arctan2(Featy-Sy,Featx-Sx) - Stheta # angle to observed feature for each particle
-    theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi
-    h = np.concatenate((r, theta_lim), axis = 0)
-    return h
-
-def test_observation_model_particle():
-    # Inputs:
-    #           S           4XM previous particle set representing the states and the weights [x,y,theta, weights]'
-    #           W           2XN coordinates of the features in x,y in tth time 
-    #           j           1X1 index of the feature being matched to the measurement observation
-    # Outputs:  
-    #           h           2XM observation function for range-bearing measurement, [r, theta]'
-    xytheta_dim = 3
-    weights_dim = 1
-    particles_dim = 7
-    S = np.ones((xytheta_dim + weights_dim, particles_dim))
-    j= 1 # observed feature
-    N = 9 # number of features
-    W = np.ones((2,N))*2
-    h = observation_model_particle(S, W, j)
-    print('observation model h', h)
-    print('h dimension: ', h.shape)  
+#def observation_model_particle(S,W,j):
+#    # This function implements the observation model, might need modification as S contains landmarks as well!
+#    # The bearing lies in the interval [-pi,pi)
+#    # Inputs:
+#    #           S           4XM previous particle set representing the states and the weights [x,y,theta, weights]'
+#    #           W           2XN coordinates of the features in x,y in tth time 
+#    #           j           1X1 index of the feature being matched to the measurement observation
+#    # Outputs:  
+#    #           h           2XM observation function for range-bearing measurement, [r, theta]'
+#    M = np.size(S[0,:])     # Number of particles in particle set    
+#    Featx = np.ones((1,M)) * W[0,j] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
+#    Featy = np.ones((1,M)) * W[1,j] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
+#    Sx = S[0,:] # Extract the x position of all particles
+#    Sy = S[1,:] # Extract the y position of all particles
+#    Stheta = S[2,:] # Extract the theta angle of all particles
+#    r = np.sqrt((Featx - Sx)**2 +(Featy - Sy)**2) # range to feature for each particle
+#    theta = np.arctan2(Featy-Sy,Featx-Sx) - Stheta # angle to observed feature for each particle
+#    theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi
+#    h = np.concatenate((r, theta_lim), axis = 0)
+#    return h
+#
+#def test_observation_model_particle():
+#    # Inputs:
+#    #           S           4XM previous particle set representing the states and the weights [x,y,theta, weights]'
+#    #           W           2XN coordinates of the features in x,y in tth time 
+#    #           j           1X1 index of the feature being matched to the measurement observation
+#    # Outputs:  
+#    #           h           2XM observation function for range-bearing measurement, [r, theta]'
+#    xytheta_dim = 3
+#    weights_dim = 1
+#    particles_dim = 7
+#    S = np.ones((xytheta_dim + weights_dim, particles_dim))
+#    j= 1 # observed feature
+#    N = 9 # number of features
+#    W = np.ones((2,N))*2
+#    h = observation_model_particle(S, W, j)
+#    print('observation model h', h)
+#    print('h dimension: ', h.shape)  
     
-def predict_motion(S, v, w, R, delta_t):
-    # This function perform the prediction step / proposal distribution
-    # Inputs:
-    #           S(t-1)              4XM previous time particle set representing the states and weights [x,y,theta, weights]'
-    #           v(t)                1X1 translational velocity of the robot in the tth time step
-    #           w(t)                1X1 angular velocity of the robot in the tth time step
-    #           R                   3X3 process noise covariance matrix of x,y and theta
-    #           delta_t             1X1 discrete time step between time t and t-1
-    # Outputs:
-    #           Sbar(t)             4XM prediction of the new states and weights [x,y,thetha,weights]
-    M = np.size(S[0,:])             # Number of particles in particle set
-    xytheta_dim = 3 # Number of states of each particle 
-    Sbar = np.zeros((4,M))
-    theta_prev = S[2,:]  # theta angle at previous time step
-    xy_predmotion = delta_t * np.array([ v * np.cos(theta_prev), v * np.sin(theta_prev) ]) # motion model on x and y for each particle  
-    theta_predmotion = delta_t * w * np.ones((1,M))  #motion model for the angle of each particle 
-    xytheta_predmotion = np.concatenate((xy_predmotion, theta_predmotion), axis = 0) # combine the complete motion model x,y and theta into one matrix 
-    xytheta_sigma = np.diag(np.sqrt(R)) # obtain standard deviation of process noise (1-dimensional array)
-    diffusion_normal = np.random.standard_normal((xytheta_dim,M))  # Normal distribution with standard deviation 1 
-    diffusion = diffusion_normal * xytheta_sigma.reshape(3,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
-    Sbar[:3,:] = S[:3,:] + xytheta_predmotion + diffusion # estimated states = old states + motion + diffusion
-    Sbar[-1,:] = S[-1,:] # keep weights as is
-    return Sbar
+#def predict_motion(S, v, w, R, delta_t):
+#    # This function perform the prediction step / proposal distribution
+#    # Inputs:
+#    #           S(t-1)              4XM previous time particle set representing the states and weights [x,y,theta, weights]'
+#    #           v(t)                1X1 translational velocity of the robot in the tth time step
+#    #           w(t)                1X1 angular velocity of the robot in the tth time step
+#    #           R                   3X3 process noise covariance matrix of x,y and theta
+#    #           delta_t             1X1 discrete time step between time t and t-1
+#    # Outputs:
+#    #           Sbar(t)             4XM prediction of the new states and weights [x,y,thetha,weights]
+#    M = np.size(S[0,:])             # Number of particles in particle set
+#    xytheta_dim = 3 # Number of states of each particle 
+#    Sbar = np.zeros((4,M))
+#    theta_prev = S[2,:]  # theta angle at previous time step
+#    xy_predmotion = delta_t * np.array([ v * np.cos(theta_prev), v * np.sin(theta_prev) ]) # motion model on x and y for each particle  
+#    theta_predmotion = delta_t * w * np.ones((1,M))  #motion model for the angle of each particle 
+#    xytheta_predmotion = np.concatenate((xy_predmotion, theta_predmotion), axis = 0) # combine the complete motion model x,y and theta into one matrix 
+#    xytheta_sigma = np.diag(np.sqrt(R)) # obtain standard deviation of process noise (1-dimensional array)
+#    diffusion_normal = np.random.standard_normal((xytheta_dim,M))  # Normal distribution with standard deviation 1 
+#    diffusion = diffusion_normal * xytheta_sigma.reshape(3,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
+#    Sbar[:3,:] = S[:3,:] + xytheta_predmotion + diffusion # estimated states = old states + motion + diffusion
+#    Sbar[-1,:] = S[-1,:] # keep weights as is
+#    return Sbar
+#
+#def test_predict_motion():
+#    # Inputs:
+#    #           S(t-1)              4XM previous time particle set representing the states and weights [x,y,theta, weights]'
+#    #           v(t)                1X1 translational velocity of the robot in the tth time step
+#    #           w(t)                1X1 angular velocity of the robot in the tth time step
+#    #           R                   3X3 process noise covariance matrix of x,y and theta
+#    #           delta_t             1X1 discrete time step between time t and t-1
+#    # Outputs:
+#    #           Sbar(t)            4XM prediction of the new states and weights [x,y,thetha,weights]
+#    xyw = 3
+#    weights = 1
+#    particles = 7
+#    S = np.ones((xyw + weights, particles))
+#    v = 1
+#    w = 0.5
+#    R = np.eye(3)
+#    delta_t = 0.1
+#    Sbar = predict_motion(S, v, w, R, delta_t)
+#    print('Sbar', Sbar)
+#    print('Sbar dimension: ', Sbar.shape)
 
-def test_predict_motion():
-    # Inputs:
-    #           S(t-1)              4XM previous time particle set representing the states and weights [x,y,theta, weights]'
-    #           v(t)                1X1 translational velocity of the robot in the tth time step
-    #           w(t)                1X1 angular velocity of the robot in the tth time step
-    #           R                   3X3 process noise covariance matrix of x,y and theta
-    #           delta_t             1X1 discrete time step between time t and t-1
-    # Outputs:
-    #           Sbar(t)            4XM prediction of the new states and weights [x,y,thetha,weights]
-    xyw = 3
-    weights = 1
-    particles = 7
-    S = np.ones((xyw + weights, particles))
-    v = 1
-    w = 0.5
-    R = np.eye(3)
-    delta_t = 0.1
-    Sbar = predict_motion(S, v, w, R, delta_t)
-    print('Sbar', Sbar)
-    print('Sbar dimension: ', Sbar.shape)
 
-
-def init_mean_from_xy(X, xy):
-    # This function should initialize the mean location of the feature in world coordinates
-    # The bearing lies in the interval [-pi,pi)
-    # Inputs:    
-    #           X           3XM previous particle set representing the states and the weights [x,y,theta]
-    #           xy          2XM observation function for xy measurement, [x, y]'    '
-    # Outputs:  
-    #           mu_init     2XM position of the feature related to each particle
-    M = np.size(X[0,:])     # Number of particles in particle set  
-    mu_init = np.zeros((2,M))
-    mu_init[0,:] = X[0,:] + xy[0,:] # X position of particle plus x-distance to feature related to the particle
-    mu_init[1,:] = X[1,:] + xy[1,:] # the same for Y
-    return mu_init
+#def init_mean_from_xy(X, xy):
+#    # This function should initialize the mean location of the feature in world coordinates
+#    # The bearing lies in the interval [-pi,pi)
+#    # Inputs:    
+#    #           X           3XM previous particle set representing the states and the weights [x,y,theta]
+#    #           xy          2XM observation function for xy measurement, [x, y]'    '
+#    # Outputs:  
+#    #           mu_init     2XM position of the feature related to each particle
+#    M = np.size(X[0,:])     # Number of particles in particle set  
+#    mu_init = np.zeros((2,M))
+#    mu_init[0,:] = X[0,:] + xy[0,:] # X position of particle plus x-distance to feature related to the particle
+#    mu_init[1,:] = X[1,:] + xy[1,:] # the same for Y
+#    return mu_init

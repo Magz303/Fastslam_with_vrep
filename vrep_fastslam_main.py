@@ -219,19 +219,35 @@ while (time.time() - starttime < totalsimtime):
                 if j == 0:
                     mu = mu_init
                 else:
-                    mu = np.concatenate((mu,mu_init),axis=2)
+                    mu = np.concatenate((mu,mu_init),axis=2) 
                 
-                # calculatione observation model jacobian
-                H = calculate_measurement_jacobian(Xbar,mu)
+                # calculatione observation model jacobian 
+                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # Only for this feature 
                 
-                # Initialize covariance
-                # Sigma  = H * np.inv(Q) * H.T
+                # Make a transpose along the 3x3 dimension for each particle
+                H_T = np.transpose(H,(1,0,2)) # 3X3XM
                 
+                # Invert Q measurement noise matrix
+                Qinv = np.linalg.inv(Q)
+                
+                # Scale the Q matrix for each particle
+                # indexing with np.newaxis inserts a new 3rd dimension, which we then repeat the
+                # array along, (you can achieve the same effect by indexing with None, see below)
+                QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 3X3XM
+
+                # Initialize covariance 
+                Sigma_init  = H * QinvS * H_T # 3X3XM
+                
+                # default importance weights
+                weights = 1/M*np.ones((1,M)) # 1XM
             
-            # if seen before
+            # else if feature has been seen before
             else:
                 j = observed_objects.index(detected_object_handle)
                 print('...observed object ', detected_object_handle, 'have been seen before...')  
+                
+                # measurement prediction
+                zhat
         # for the other features  
         else:   
             mu = mu
