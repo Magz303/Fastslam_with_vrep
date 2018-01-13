@@ -10,68 +10,6 @@ Containts functions and simplified test functions for vrep_fastslam
 """
 import numpy as np
 
-
-
-def associate_known(Sbar, z, W, Lambda_psi, Q, known_association):
-    #           S_bar(t)            4XM particle set representing the estimated states and weights [x,y,theta, weights]'
-    #           z(t)                2Xn measured range and angle between observed landmark and robot
-    #           W                   2XN coordinates of the landmark in x,y in tth time 
-    #           Lambda_psi          1X1 threshhold parameter for detecting outliers
-    #           Q                   2X2 measurement noise covariance matrix
-    #           known_associations  1Xn association
-    # Outputs: 
-    #           outlier             1Xn boolean = if identified association is an outlier
-    #           Psi(t)              1XnXM most likely value
-    return
-#function [outlier,Psi] = associate_known(S_bar,z,W,Lambda_psi,Q,known_associations)
-#% dimensions
-#n = size(z,2);      % number of observations made n (i)
-#N = size(W,2);      % number of landmarks known N (k)
-#M = size(S_bar,2);  % number of particles M (m)
-#
-#% memory allocation
-#X = zeros(2,M);
-#nu_r = zeros(2,M);
-#nu_theta = zeros(2,M);
-#nu_theta_mod = zeros(2,M);
-#outlier = zeros(1,n);
-#Psi_ikm = zeros(N,n,M);
-#
-#% maximum likelihood data association algorithm
-#for i = 1:n 
-#    for k=1:N
-#        X = observation_model(S_bar,W,k); % predict measurement 2xM
-#        nu_r = z(1,i) - X(1,:); % innovation range
-#        nu_theta = z(2,i) - X(2,:);  % innovation angle
-#        nu_theta_mod = mod(nu_theta+pi,2*pi)-pi; % keep angle error value between -pi and pi
-#        Psi_ikm(k,i,:) = det(2*pi*Q)^(-1/2)*exp(-0.5 * ((nu_r).^2/Q(1,1) + (nu_theta_mod).^2 / Q(2,2)));  % likelihood
-#    end
-#end
-#
-#% use known associations
-#Psi = Psi_ikm(known_associations,:,:);
-#
-#% maximize the likelihood of the known associations
-#if (size(Psi,2) > 1)
-#    Psi = max(Psi); % 1xnxM
-#end
-#
-#% detect outliers
-#for i =1:n    
-#    outlier(i) = mean(Psi(1,i,:)) <= Lambda_psi;
-#end
-#
-#% for debug purposes
-#[Psi_check,Psi_index]=max(Psi_ikm);
-#outlier_check = Psi_index(:,:,1) ~= known_associations;
-#
-#% also notice that you have to do something here even if you do not have to maximize the likelihood.
-#
-#end
-
-
-    
-
 # USED IN SIM!
 def init_mean_from_z(X, z): # see p.320
     # This function should initialize the mean location mu of the feature in world coordinates
@@ -115,14 +53,14 @@ def calculate_measurement_jacobian(X,mu,j):
     # for a given feature and the particle set
     # Inputs:
     #           X(t)    3XM estimated states [x,y,theta]'   
-    #           mu(t)   2XMXN observed mean position of features [x,y]'       
+    #           mu(t)   NX2XM observed mean position of features [x,y]'       
     # Outputs:  
-    #           H       3X3XM H is the Jacobian of h corresponding to any observation evaluated at mu_bar t
+    #           H       MX3X3 H is the Jacobian of h corresponding to any observation evaluated at mu_bar t
     
     # Get variables
     M = np.size(X[0,:])     # Number of particles in particle set    
-    mux = mu[0,:,j] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
-    muy = mu[1,:,j] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
+    mux = mu[j,0,:] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
+    muy = mu[j,1,:] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
     Xx = X[0,:] # Extract the x position of all particles
     Xy = X[1,:] # Extract the y position of all particles
     Xtheta = X[2,:] # Extract the theta angle of all particles
@@ -150,10 +88,10 @@ def calculate_measurement_jacobian(X,mu,j):
     dhtheta_dy2 = dhtheta_dy.reshape(1,1,M)
     dhtheta_dtheta = dhtheta_dtheta.reshape(1,1,M)
     dzero2 = dzero.reshape(1,1,M)
-    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=0)
-    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0)
-    H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0)
-    H = np.concatenate((H1,H2,H3), axis=1)
+    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=0).T
+    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0).T
+    H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0).T
+    H = np.concatenate((H1,H2,H3), axis=1) # MX3X3
     return H
 
 
@@ -164,21 +102,23 @@ def observation_model_zhat(X,mu,j,Q): # maybe remove Q and j here....
     # Note: The bearing theta lies in the interval [-pi,pi) in relation to the particle set X
     # Inputs:
     #           X           3XM previous particle set representing the states and the weights [x,y,theta]'
-    #           mu          2XMXN coordinates of the features in x,y in tth time 
+    #           mu          NX2XM coordinates of the features in x,y in tth time 
     #           j           1X1 index of the feature being matched to the measurement observation
     #           Q           3X3 measurement covariance noise   
     # Outputs:  
     #           z           2XM observation function for range-bearing measurement, [r, theta]'
     M = np.size(X[0,:])     # Number of particles in particle set    
-    Featx = mu[0,0,j] # Extract one feature j for creating a distance calculation in x for all particles
-    Featy = mu[1,0,j] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
+    Featx = mu[j,0,:] # Extract one feature j for creating a distance calculation in x for all particles
+    Featy = mu[j,1,:] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
     Xx = X[0,:] # Extract the x position of all particles
     Xy = X[1,:] # Extract the y position of all particles
     Xtheta = X[2,:] # Extract the theta angle of all particles
-    r = np.sqrt((Featx - Xx)**2 +(Featy - Xy)**2) # range to feature for each particle
+    ra = np.sqrt((Featx - Xx)**2 +(Featy - Xy)**2) # range to feature for each particle
+    ra = ra.reshape(1,M)
     theta = np.arctan2(Featy-Xy,Featx-Xx) - Xtheta # angle to observed feature for each particle
     theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi
-    zmeas = np.concatenate((r, theta_lim), axis = 0)
+    theta_lim = theta_lim.reshape(1,M)
+    zmeas = np.concatenate((ra, theta_lim), axis = 0)
     # Add diffusion
     rtheta_stddev2 = np.diag(np.sqrt(Q)) # obtain standard deviation square of process noise (1-dimensional array)
     diffusion_normal = np.random.standard_normal((3,M))  # Normal distribution with standard deviation 1 
@@ -447,3 +387,62 @@ def predict_motion_xytheta(x, y, theta, v, w, delta_t):
 #    mu_init[0,:] = X[0,:] + xy[0,:] # X position of particle plus x-distance to feature related to the particle
 #    mu_init[1,:] = X[1,:] + xy[1,:] # the same for Y
 #    return mu_init
+    
+    #
+#def associate_known(Sbar, z, W, Lambda_psi, Q, known_association):
+#    #           S_bar(t)            4XM particle set representing the estimated states and weights [x,y,theta, weights]'
+#    #           z(t)                2Xn measured range and angle between observed landmark and robot
+#    #           W                   2XN coordinates of the landmark in x,y in tth time 
+#    #           Lambda_psi          1X1 threshhold parameter for detecting outliers
+#    #           Q                   2X2 measurement noise covariance matrix
+#    #           known_associations  1Xn association
+#    # Outputs: 
+#    #           outlier             1Xn boolean = if identified association is an outlier
+#    #           Psi(t)              1XnXM most likely value
+#    return
+#function [outlier,Psi] = associate_known(S_bar,z,W,Lambda_psi,Q,known_associations)
+#% dimensions
+#n = size(z,2);      % number of observations made n (i)
+#N = size(W,2);      % number of landmarks known N (k)
+#M = size(S_bar,2);  % number of particles M (m)
+#
+#% memory allocation
+#X = zeros(2,M);
+#nu_r = zeros(2,M);
+#nu_theta = zeros(2,M);
+#nu_theta_mod = zeros(2,M);
+#outlier = zeros(1,n);
+#Psi_ikm = zeros(N,n,M);
+#
+#% maximum likelihood data association algorithm
+#for i = 1:n 
+#    for k=1:N
+#        X = observation_model(S_bar,W,k); % predict measurement 2xM
+#        nu_r = z(1,i) - X(1,:); % innovation range
+#        nu_theta = z(2,i) - X(2,:);  % innovation angle
+#        nu_theta_mod = mod(nu_theta+pi,2*pi)-pi; % keep angle error value between -pi and pi
+#        Psi_ikm(k,i,:) = det(2*pi*Q)^(-1/2)*exp(-0.5 * ((nu_r).^2/Q(1,1) + (nu_theta_mod).^2 / Q(2,2)));  % likelihood
+#    end
+#end
+#
+#% use known associations
+#Psi = Psi_ikm(known_associations,:,:);
+#
+#% maximize the likelihood of the known associations
+#if (size(Psi,2) > 1)
+#    Psi = max(Psi); % 1xnxM
+#end
+#
+#% detect outliers
+#for i =1:n    
+#    outlier(i) = mean(Psi(1,i,:)) <= Lambda_psi;
+#end
+#
+#% for debug purposes
+#[Psi_check,Psi_index]=max(Psi_ikm);
+#outlier_check = Psi_index(:,:,1) ~= known_associations;
+#
+#% also notice that you have to do something here even if you do not have to maximize the likelihood.
+#
+#end
+
