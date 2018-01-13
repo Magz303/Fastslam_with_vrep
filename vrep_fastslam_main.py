@@ -122,15 +122,17 @@ X = np.zeros((3,M)) # Set of particles
 # observed_objects_pos = np.zeros((2,M,1)) # observed object position in time t
 mu = np.zeros((2,M,1)) # features mean position related to each particle 
 mu_init = np.zeros((2,M,1)) # features mean position related to each particle 
-sigma = np.zeros((2,M,1)) # feature covariance related to each particle
+Sigma = np.zeros((3,3,M,1)) # feature position covariance related to each particle and feature
+Sigma_init = np.zeros((3,3,M,1)) # feature position covariance related to each particle and feature
 
 # Initialize process noise acovariance matricies
 stddev_R = 1
 R = np.eye(3) * stddev_R**2
 
 # Initialize measurement noise acovariance matricies
-stddev_Q = 0.1
-Q = np.eye(3) * stddev_Q
+stddev_Qt = 0.1
+Qt = np.eye(3) * stddev_Qt
+QtS = np.repeat(Qt[:, :, np.newaxis], M, axis=2) # 3X3XM
 
 # Initialize number of observed objects
 observed_objects = []
@@ -191,7 +193,7 @@ while (time.time() - starttime < totalsimtime):
         # Sbar = vf.predict_motion(S, v[m], w[m], R, dtsim[m])
         
         # Sample pose
-        Xbar = vf.sample_pose(X, v[m], w[m], R, dtsim[m])
+        Xbar = vf.sample_pose(X, v[m], w[m], R, dtsim[m]) # 3XM ([x,y,theta]'XM)
         
         # if feature observed
         if (detection_state):
@@ -209,34 +211,48 @@ while (time.time() - starttime < totalsimtime):
              
                 # Calculate range and angle to feature related to each particle in the particle set
                 # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
-                observed_objects_pos = np.asarray(detectedPoint[0:2]).reshape(2,1)
-                z = vf.observation_model(Xbar,observed_objects_pos,j,Q)
+                observed_objects_pos = np.asarray(detectedPoint[0:2]).reshape(2,1) #2X1
+                z = vf.observation_model(Xbar,observed_objects_pos,j,Qt) # 2XM
                 
                 # Initialize mean x,y position of feature based on range and angle in z
-                mu_init[:,:,0] = vf.init_mean_from_z(Xbar, z)
+                mu_init[:,:,0] = vf.init_mean_from_z(Xbar, z) # 2XMX1
                 
                 # Add to list of mean position x,y of features
                 if j == 0:
-                    mu = mu_init
+                    mu = mu_init # 2XMX1
                 else:
-                    mu = np.concatenate((mu,mu_init),axis=2) 
+                    mu = np.concatenate((mu,mu_init),axis=2) # 2XMXN
                 
                 # calculatione observation model jacobian 
-                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # Only for this feature 
+                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # # 3X3XM. Only for this feature 
                 
                 # Make a transpose along the 3x3 dimension for each particle
                 H_T = np.transpose(H,(1,0,2)) # 3X3XM
                 
+                # Inverse of jacobian of measurement model 
+                # https://stackoverflow.com/questions/41850712/compute-inverse-of-2d-arrays-along-the-third-axis-in-a-3d-array-without-loops
+                Hinv = np.linalg.inv(H.T).T
+                
+                # Make a transpose along the 3x3 dimension for each particle
+                Hinv_T = np.transpose(Hinv,(1,0,2)) # 3X3XM
+                
+                
                 # Invert Q measurement noise matrix
-                Qinv = np.linalg.inv(Q)
+                # Qinv = np.linalg.inv(Qt) # 3X3
                 
                 # Scale the Q matrix for each particle
                 # indexing with np.newaxis inserts a new 3rd dimension, which we then repeat the
                 # array along, (you can achieve the same effect by indexing with None, see below)
-                QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 3X3XM
+                # QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 3X3XM
 
                 # Initialize covariance 
-                Sigma_init  = H * QinvS * H_T # 3X3XM
+                Sigma_init[:,:,:,0]  = Hinv * QtS * Hinv_T # 3X3XMX1
+                
+                # Add to list of sigma covariance of features
+                if j == 0:
+                    Sigma = Sigma_init #3X3XM
+                else:
+                    Sigma = np.concatenate((Sigma,Sigma_init),axis=3) # 3X3XMXN                
                 
                 # default importance weights
                 weights = 1/M*np.ones((1,M)) # 1XM
@@ -246,12 +262,31 @@ while (time.time() - starttime < totalsimtime):
                 j = observed_objects.index(detected_object_handle)
                 print('...observed object ', detected_object_handle, 'have been seen before...')  
                 
-                # measurement prediction
-                zhat
-        # for the other features  
+                # measurement prediction based on particle set X and mean feature position mu
+                zhat = vf.observation_model_zhat(Xbar,mu,j,Qt) # 2XM
+                
+                # calculate jacobian
+                H = calculate_measurement_jacobian(X,mu,j) # 3X3XM
+                
+                # Make a transpose along the 3x3 dimension for each particle
+                H_T = np.transpose(H,(1,0,2)) # 3X3XM      
+                
+                # Measurement covariance (not the same as Qt measurement covariance noise)
+                Q = H * Sigma[:,:,:,j] * H_T + QtS
+                
+                # Inverse of measurement covariance
+                Qinv = np.linalg.inv(Q)
+                
+                # Calculate Kalman gain
+                K = Sigma[:,:,:,j] * H_T * Qinv
+                
+                # update mean
+                
+                
+        # for the other features that were not detected  
         else:   
             mu = mu
-            sigma = sigma
+            Sigma = Sigma
             # mean and covariance the same
             
         # resample

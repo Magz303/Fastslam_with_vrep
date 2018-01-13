@@ -158,7 +158,35 @@ def calculate_measurement_jacobian(X,mu,j):
 
 
 # USED IN SIM!    
-def observation_model(X,W,j,Q):
+def observation_model_zhat(X,mu,j,Q): # maybe remove Q and j here....
+    # This function implements the observation model and calculates the range and angle zhat for 
+    # a given feature j in mean [x,y] coordinates mu (in relation to each particle) and particle set X
+    # Note: The bearing theta lies in the interval [-pi,pi) in relation to the particle set X
+    # Inputs:
+    #           X           3XM previous particle set representing the states and the weights [x,y,theta]'
+    #           mu          2XMXN coordinates of the features in x,y in tth time 
+    #           j           1X1 index of the feature being matched to the measurement observation
+    #           Q           3X3 measurement covariance noise   
+    # Outputs:  
+    #           z           2XM observation function for range-bearing measurement, [r, theta]'
+    M = np.size(X[0,:])     # Number of particles in particle set    
+    Featx = mu[0,0,j] # Extract one feature j for creating a distance calculation in x for all particles
+    Featy = mu[1,0,j] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
+    Xx = X[0,:] # Extract the x position of all particles
+    Xy = X[1,:] # Extract the y position of all particles
+    Xtheta = X[2,:] # Extract the theta angle of all particles
+    r = np.sqrt((Featx - Xx)**2 +(Featy - Xy)**2) # range to feature for each particle
+    theta = np.arctan2(Featy-Xy,Featx-Xx) - Xtheta # angle to observed feature for each particle
+    theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi
+    zmeas = np.concatenate((r, theta_lim), axis = 0)
+    # Add diffusion
+    rtheta_stddev2 = np.diag(np.sqrt(Q)) # obtain standard deviation square of process noise (1-dimensional array)
+    diffusion_normal = np.random.standard_normal((3,M))  # Normal distribution with standard deviation 1 
+    diffusion = diffusion_normal * rtheta_stddev2.reshape(3,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
+    z = zmeas + diffusion[:2,:] # estimated states = old states + motion + diffusion    
+    return z    
+
+def observation_model(X,W,j,Q): # maybe remove Q and j here....
     # This function implements the observation model and calculates the range and angle z for 
     # a given feature j in [x,y] coordinates W and particle set X
     # Note: The bearing theta lies in the interval [-pi,pi) in relation to the particle set X
