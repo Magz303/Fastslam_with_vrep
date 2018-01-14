@@ -133,8 +133,12 @@ R = np.eye(3) * stddev_R**2
 
 # Initialize measurement noise acovariance matricies
 stddev_Qt = 0.1
-Qt = np.eye(3) * stddev_Qt
+stddev_range = 0.1
+stddev_bearing = 0.01
+Qt = np.eye(2) * stddev_Qt
+Qt = np.array([[stddev_range, 0],[0, stddev_bearing]])
 QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0)
+QtSinv = np.linalg.inv(QtS)
 
 # Initialize number of observed objects
 observed_objects = []
@@ -229,19 +233,17 @@ while (time.time() - starttime < totalsimtime):
                     mu = np.concatenate((mu,mu_init),axis=0) # NX2XM
                 
                 # calculatione observation model jacobian 
-                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # # MX3X3. Only for this feature 
+                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # # MX2X3. Only for this feature 
                 
                 # Make a transpose along the 3x3 dimension for each particle
-                H_T = np.transpose(H,(1,0,2)) # MX3X3
+                H_T = np.transpose(H,(1,0,2)) # MX3X2
                 
                 # Inverse of jacobian of measurement model 
                 # https://stackoverflow.com/questions/41850712/compute-inverse-of-2d-arrays-along-the-third-axis-in-a-3d-array-without-loops
                 # Hinv = np.linalg.inv(H.T).T
-                Hinv = H
                 
-                # Make a transpose along the 3x3 dimension for each particle
-                H_T = np.transpose(H,(0,2,1)) # MX3X3
-                Hinv_T = H_T
+                # Make a transpose along the 2x3 dimension for each particle M
+                H_T = np.transpose(H,(0,2,1)) # MX3X2
                 
                 # Invert Q measurement noise matrix
                 # Qinv = np.linalg.inv(Qt) # 3X3
@@ -252,7 +254,9 @@ while (time.time() - starttime < totalsimtime):
                 # QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 3X3XM
 
                 # Initialize covariance 
-                Sigma_init[0,:,:,:]  = Hinv * QtS * Hinv_T # 1XMX3X3
+                #Sigma_init[0,:,:,:]  = np.linalg.inv(H_T @ QtSinv @ H) # 1XMX3X3
+                Sigma_init[0,:,:,:]  = (H_T @ QtSinv @ H)
+                
                 
                 # Add to list of sigma covariance of features
                 if j == 0:
@@ -260,7 +264,7 @@ while (time.time() - starttime < totalsimtime):
                 else:
                     Sigma = np.concatenate((Sigma,Sigma_init),axis=0) # NXMX3X3              
                 
-                # default importance weights
+                # default importance weights, should be equal to one
                 weights = 1/M*np.ones((1,M)) # 1XM
             
             # else if feature has been seen before
@@ -272,44 +276,51 @@ while (time.time() - starttime < totalsimtime):
                 zhat = vf.observation_model_zhat(Xbar,mu,j,Qt) # 2XM
                 
                 # calculate jacobian
-                H = vf.calculate_measurement_jacobian(X,mu,j) # MX3X3
+                H = vf.calculate_measurement_jacobian(X,mu,j) # MX2X3
                 
                 # Make a transpose along the 3x3 dimension for each particle
-                H_T = np.transpose(H,(0,2,1)) # MX3X3     
+                H_T = np.transpose(H,(0,2,1)) # MX3X2     
                 
                 # Measurement covariance (not the same as Qt measurement covariance noise)
-                Q = H @ Sigma[j,:,:,:] @ H_T + QtS # MX3X3
+                Q = H @ Sigma[j,:,:,:] @ H_T + QtS # MX2X2
                 
                 # Inverse of measurement covariance
-                Qinv = np.linalg.inv(Q) # MX3X3
+                Qinv = np.linalg.inv(Q) # MX2X2
                 
                 # Calculate Kalman gain
-                K = Sigma[j,:,:,:] @ H_T @ Qinv # MX3X3
+                K = Sigma[j,:,:,:] @ H_T @ Qinv # MX3X2
                 
-                # measurement error # 2XM
-                zerror = (z-zhat) # 2XM
+                # innovation 2XM
+                nu = (z-zhat) # 2XM
                 
+                # correct angle innovation to be within -pi and pi
+                nu[1,:] = ((nu[1,:] + np.pi) % (2*np.pi)) - np.pi
+               
                 # Add extra row to measurement error for Kalman gain multiplication
-                zerror = np.concatenate((z,np.zeros((1,M))),axis=0) # 3XM, but I want it MX3X1
-                zerror = np.transpose(zerror.reshape(3,5,1),(1,0,2)) # MX3X1
+                #zerror = np.concatenate((z,np.zeros((1,M))),axis=0) # 3XM, but I want it MX3X1
+                nu = np.transpose(nu.reshape(2,5,1),(1,0,2)) # MX2X1
                 
-                # update mean. CONSIDER: revise dimensions to make this simpler and also mu_new
-                mu[j,:,:] = mu[j,:,:] + (K @ zerror).T[:,:2,:] # NX2XM # think about changing to NXMX2X1
+                # update mean. Is this really correct??? mixing coordinates? features x,y. nu is in r,theta. Kalman gain ???.
+                mu[j,:,:] = mu[j,:,:] + (K @ nu).T[:,:2,:] # NX2XM # think about changing to NXMX2X1
                 
                 # update covariance
-                Sigma[j,:,:,:] = (I - K@H)@Sigma[j,:,:,:]# NXMX3X3
+                Sigma[j,:,:,:] = (I - K@H) @ Sigma[j,:,:,:]# NXMX3X3
                 
-                # importance factor amplitude
-                ata = 1/np.sqrt(np.pi*2*Q) # MX3X3
+                # importance factor amplitude. Correct with det(Q)? consider checking H
+                ata = 1/np.sqrt(np.pi*2*np.linalg.det(Q)) # 1XM
                 
-                # Transpose zerror
-                zerrorT = np.transpose(zerror,(0,2,1))
+                # Transpose innovation nu
+                nuT = np.transpose(nu,(0,2,1))
                 
-                # distance
-                nu = -1/2*(zerrorT) @ Qinv @ zerror #MX5X1
+                # Mahalonobis distance
+                D = nuT @ Qinv @ nu # MX1X1
                 
-                # importance factor
-                weights = ata*np.exp(nu)
+                # importance factors
+                weights_not_normalized = ata*np.exp(-0.5*D.reshape(1,5)) # 1XM
+                
+                # normalize the weights
+                weightsum = np.sum(weights_not_normalized)
+                weights = weights_not_normalized / weightsum
                 
                 
                 
@@ -319,25 +330,30 @@ while (time.time() - starttime < totalsimtime):
             mu = mu
             Sigma = Sigma
                        
-        # resample
-# % This function performs systematic re-sampling
-#% Inputs:   
-#%           S_bar(t):       4XM
-#% Outputs:
-#%           S(t):           4XM
-#function S = systematic_resample(S_bar)
-#
-#cdf = cumsum(S_bar(4,:));
-#M = size(S_bar,2);
-#S = zeros(size(S_bar));
-#r_0 = rand / M;
-#for m = 1 : M
-#    i = find(cdf >= r_0,1,'first');
-#    S(1:3,m) = S_bar(1:3,i);
-#    r_0 = r_0 + 1/M;
-#end
-#S(4,:) = 1/M*ones(size(S_bar(4,:)));
-#end       
+        # Resampling  
+        
+        # Re-initialize the particles
+        X = np.zeros((3,M))
+             
+        # systematic resampling
+        cdf = np.cumsum(weights)
+        rval = np.asscalar(np.random.rand(1)) / M # uniform distributed random value between 0 and 1/M
+        
+        # draw a sample with a proportional probability to the weights
+        for n in range(0,M-1):
+            
+            # find first value equal to or above the random selected value
+            select = np.searchsorted(cdf,rval,'right') 
+            
+            # Save this particle for next iteration
+            X[:,n] = Xbar[:,select]
+            
+            # increment the randomly selected value
+            rval = rval + 1/M
+            
+        # Re-initialize the weights
+        weights = 1/M*np.ones((1,M))
+            
         
         # test of ploting the course using drawnow?
         

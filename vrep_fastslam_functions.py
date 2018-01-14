@@ -55,7 +55,7 @@ def calculate_measurement_jacobian(X,mu,j):
     #           X(t)    3XM estimated states [x,y,theta]'   
     #           mu(t)   NX2XM observed mean position of features [x,y]'       
     # Outputs:  
-    #           H       MX3X3 H is the Jacobian of h corresponding to any observation evaluated at mu_bar t
+    #           H       MX2X3 H is the Jacobian of h corresponding to any observation evaluated at mu_bar t
     
     # Get variables
     M = np.size(X[0,:])     # Number of particles in particle set    
@@ -72,27 +72,37 @@ def calculate_measurement_jacobian(X,mu,j):
     dhr_dtheta = np.zeros((1,M))
     
     # angle linearization
-    dhtheta_dx = (Xx-mux)/ q #1X5
+    dhtheta_dx = (Xx-mux)/ q #1XM
     dhtheta_dy = -(Xy-muy)/ q
     dhtheta_dtheta = -1*np.ones((1,M))
     
+    # CONSIDER: Using additional row
     tol = 1e-6
     dzero = np.ones((1,1,M))*tol
 
-    # Jacobian should cover all particles 3X3XM. Now it is 15X15X3
+    # Jacobian should cover all particles MX3X3. 
     # I have 1X5, 1X5, ...
     # I want 1X1X5, 1X1X5,... thereafter concatenate
-    dhr_dx2 = dhr_dx.reshape(1,1,M)
-    dhr_dy2 = dhr_dy.reshape(1,1,M)
-    dhr_dtheta2 = dhr_dtheta.reshape(1,1,M)    
-    dhtheta_dx2 = dhtheta_dx.reshape(1,1,M)
-    dhtheta_dy2 = dhtheta_dy.reshape(1,1,M)
-    dhtheta_dtheta = dhtheta_dtheta.reshape(1,1,M)
-    dzero2 = dzero.reshape(1,1,M)
-    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=0).T
-    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0).T
-    H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0).T
-    H = np.concatenate((H1,H2,H3), axis=1) # MX3X3
+    #    dhr_dx2 = dhr_dx.reshape(1,1,M)
+    #    dhr_dy2 = dhr_dy.reshape(1,1,M)
+    #    dhr_dtheta2 = dhr_dtheta.reshape(1,1,M)    
+    #    dhtheta_dx2 = dhtheta_dx.reshape(1,1,M)
+    #    dhtheta_dy2 = dhtheta_dy.reshape(1,1,M)
+    #    dhtheta_dtheta = dhtheta_dtheta.reshape(1,1,M)
+    #    dzero2 = dzero.reshape(1,1,M)
+    #    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=0).T
+    #    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0).T
+    #    H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0).T
+    #        H = np.concatenate((H1,H2), axis=1) # MX2X3
+    dhr_dx2 = dhr_dx.reshape(M,1,1)
+    dhr_dy2 = dhr_dy.reshape(M,1,1)
+    dhr_dtheta2 = dhr_dtheta.reshape(M,1,1)    
+    dhtheta_dx2 = dhtheta_dx.reshape(M,1,1)
+    dhtheta_dy2 = dhtheta_dy.reshape(M,1,1)
+    dhtheta_dtheta = dhtheta_dtheta.reshape(M,1,1)
+    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=2)
+    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=2)
+    H = np.concatenate((H1,H2), axis=1) # MX2X3
     return H
 
 
@@ -105,7 +115,7 @@ def observation_model_zhat(X,mu,j,Q): # maybe remove Q and j here....
     #           X           3XM previous particle set representing the states and the weights [x,y,theta]'
     #           mu          NX2XM coordinates of the features in x,y in tth time 
     #           j           1X1 index of the feature being matched to the measurement observation
-    #           Q           3X3 measurement covariance noise   
+    #           Q           2X2 measurement covariance noise   
     # Outputs:  
     #           z           2XM observation function for range-bearing measurement, [r, theta]'
     M = np.size(X[0,:])     # Number of particles in particle set    
@@ -122,8 +132,8 @@ def observation_model_zhat(X,mu,j,Q): # maybe remove Q and j here....
     zmeas = np.concatenate((ra, theta_lim), axis = 0)
     # Add diffusion
     rtheta_stddev2 = np.diag(np.sqrt(Q)) # obtain standard deviation square of process noise (1-dimensional array)
-    diffusion_normal = np.random.standard_normal((3,M))  # Normal distribution with standard deviation 1 
-    diffusion = diffusion_normal * rtheta_stddev2.reshape(3,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
+    diffusion_normal = np.random.standard_normal((2,M))  # Normal distribution with standard deviation 1 
+    diffusion = diffusion_normal * rtheta_stddev2.reshape(2,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
     z = zmeas + diffusion[:2,:] # estimated states = old states + motion + diffusion    
     return z    
 
@@ -135,7 +145,7 @@ def observation_model(X,W,j,Q): # maybe remove Q and j here....
     #           X           3XM previous particle set representing the states and the weights [x,y,theta]'
     #           W           2XN coordinates of the features in x,y in tth time 
     #           j           1X1 index of the feature being matched to the measurement observation
-    #           Q           3X3 measurement covariance noise   
+    #           Q           2X2 measurement covariance noise   
     # Outputs:  
     #           z           2XM observation function for range-bearing measurement, [r, theta]'
     M = np.size(X[0,:])     # Number of particles in particle set    
@@ -150,8 +160,8 @@ def observation_model(X,W,j,Q): # maybe remove Q and j here....
     zmeas = np.concatenate((r, theta_lim), axis = 0)
     # Add diffusion
     rtheta_stddev2 = np.diag(np.sqrt(Q)) # obtain standard deviation square of process noise (1-dimensional array)
-    diffusion_normal = np.random.standard_normal((3,M))  # Normal distribution with standard deviation 1 
-    diffusion = diffusion_normal * rtheta_stddev2.reshape(3,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
+    diffusion_normal = np.random.standard_normal((2,M))  # Normal distribution with standard deviation 1 
+    diffusion = diffusion_normal * rtheta_stddev2.reshape(2,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
     z = zmeas + diffusion[:2,:] # estimated states = old states + motion + diffusion    
     return z
 
@@ -162,7 +172,7 @@ def test_observation_model():
     j= 1 # observed feature
     N = 9 # number of features
     W = np.ones((2,N))*2
-    Q = np.eye(3)*0.01
+    Q = np.eye(2)*0.01
     z = observation_model(X, W, j, Q)
     print('observation model z', z)
     print('z dimension: ', z.shape)  
