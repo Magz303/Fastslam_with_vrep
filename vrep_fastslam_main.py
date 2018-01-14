@@ -13,7 +13,9 @@ import threading # used to control the robot path in parallel to the observation
 import numpy as np # used for numerical calculations
 import matplotlib.pyplot as plt # used for plotting the robot position and map
 import time # used for simulation time steps
-from matplotlib.animation import FuncAnimation # for animated plotting
+import matplotlib.animation as animation # for animated plotting
+import matplotlib.patches as mpatches # used for legend
+import itertools # for reducing a 2d list to 1d list
 
 # This file uses the vrep API library. Check that connection to Vrep can be established
 try:
@@ -121,9 +123,10 @@ sensed_obj_pos = np.zeros((ns,2))
 
 # Initialize particles (landmark, particles, rows, cols)
 M = 5 # Number of particles
-#S = np.zeros((4,M)) # Set of particles including weights
-X = np.zeros((3,M)) # Set of particles 
-# observed_objects_pos = np.zeros((2,M,1)) # observed object position in time t
+Xstart = np.array([0, 0, -np.pi/2]) # Assumed particle start position
+X = np.repeat(Xstart[:, np.newaxis], M, axis=1) # Set of particles 
+particles_xpos = [X[0,:].tolist()]
+particles_ypos = [X[1,:].tolist()]
 mu = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_init = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_new = np.zeros((1,2,M))
@@ -152,7 +155,6 @@ I = np.repeat(np.eye(3)[np.newaxis, :, : ], M, axis=0)
 
 # Initialize counter
 m = 0 # counter for main loop
-
 
 print('...')
 print('... total running time: ', totalsimtime, 's')
@@ -359,8 +361,9 @@ while (time.time() - starttime < totalsimtime):
         weights = 1/M*np.ones((1,M))
             
         
-        # test of ploting the course using drawnow?
-        
+        # save data for plotting
+        particles_xpos.append(X[0,:].tolist())
+        particles_ypos.append(X[1,:].tolist())
 
         # Before ending loop, increment iteration 
         m = m + 1
@@ -385,53 +388,67 @@ carpos = np.asarray(carpos)
 xtrue = carpos[:,0]
 ytrue = carpos[:,1]
 
-# plot the true path
-#fig1, ax1 = plt.subplots()
-#plt.plot(xtrue,ytrue,xodom,yodom,featpos[0,0],featpos[0,1],'*',featpos[1,0],featpos[1,1],'*',featpos[2,0],featpos[2,1],'*',featpos[3,0],featpos[3,1],'*',featpos[4,0],featpos[4,1],'*',featpos[5,0],featpos[5,1],'*',featpos[6,0],featpos[6,1],'*',featpos[7,0],featpos[7,1],'*',featpos[8,0],featpos[8,1],'*')
-
-# Setup plotting. Remember to run in auto mode and not inline
-# https://matplotlib.org/api/animation_api.html
-#fig, ax = plt.subplots()
-#xdata, ydata = [], []
-#ln, = plt.plot([], [], 'ro', animated=True)
-#
-#def init():
-#    ax.set_xlim(0, 2*np.pi)
-#    ax.set_ylim(-1, 1)
-#    return ln,
-#
-#def update(frame):
-#    xdata.append(frame)
-#    ydata.append(np.sin(frame))
-#    ln.set_data(xdata, ydata)
-#    return ln,
-#
-#ani = FuncAnimation(fig, update, frames=np.linspace(0, 2*np.pi, 128),
-#                    init_func=init, blit=True)
-#plt.show()
-
-# plot the true path as an animation
 fig, ax = plt.subplots()
+csfont = {'fontname':'sans-serif'} # Verdana, Arial
+hfont = {'fontname':'sans-serif'}
+ax.grid(True)
+plt.title('Simulated world',**csfont)
+plt.ylabel('y',**hfont)
+plt.xlabel('x',**hfont)
 xdata, ydata = [], []
+xdata2, ydata2 = [], []
+xdata3, ydata3 = [], []
 line, = plt.plot([], [], 'ro', animated=True)
+line2, = plt.plot([], [], 'g*', animated=True)
+line3, = plt.plot([], [], 'b+', animated=True)
+
+
+
+#b : blue.
+#g : green.
+#r : red.
+#c : cyan.
+#m : magenta.
+#y : yellow.
+#k : black.
+#w : white.
+red_patch = mpatches.Patch(color='red', label='exact car position')
+green_patch = mpatches.Patch(color='green', label='odometry information')
+blue_patch = mpatches.Patch(color='blue', label='particles')
+plt.legend(handles=[red_patch, green_patch , blue_patch])
+
+#particles_xpos1d = list(itertools.chain.from_iterable(particles_xpos))
+#particles_ypos1d = list(itertools.chain.from_iterable(particles_xpos))
 
 # set the axis of the plot
 def init():
-    ax.set_xlim(-2, 2)
-    ax.set_ylim(-2, 2)
+    ax.set_xlim(-3, 3)
+    ax.set_ylim(-3, 3)
     return line,
 
 # data to use
 def update(frame):
     xdata.append(xtrue[frame])
     ydata.append(ytrue[frame])
+    xdata2.append(xodom[frame])
+    ydata2.append(yodom[frame]) 
+    xdata3.append(particles_xpos[frame])
+    ydata3.append(particles_ypos[frame]) 
     line.set_data(xdata, ydata)
-    return line,
+    line2.set_data(xdata2, ydata2)   
+    line3.set_data(xdata3, ydata3)
+    return line, line2, line3
 
-ani = FuncAnimation(fig, update, interval=100, init_func=init, blit=True)
+anim = animation.FuncAnimation(fig, update, interval=100, frames=ns, init_func=init, blit=True)
 
-#ani = FuncAnimation(fig, update, frames=np.linspace(0, len(xtrue), len(xtrue)),
-#                    init_func=init, blit=True)
+# to save the file as an animation, one needs ffmpeg. Anaconda: conda install -c conda-forge ffmpeg
+Writer = animation.writers['ffmpeg']
+writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+anim.save('basic_animation.mp4', writer=writer)
+
+# plot landmarks
+plt.plot(featpos[0,0],featpos[0,1],'m*',featpos[1,0],featpos[1,1],'m*',featpos[2,0],featpos[2,1],'m*',featpos[3,0],featpos[3,1],'m*',featpos[4,0],featpos[4,1],'m*',featpos[5,0],featpos[5,1],'m*',featpos[6,0],featpos[6,1],'m*',featpos[7,0],featpos[7,1],'m*',featpos[8,0],featpos[8,1],'m*')
+
 plt.show()
 
 
