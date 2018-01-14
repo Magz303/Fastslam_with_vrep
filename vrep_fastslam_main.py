@@ -13,6 +13,7 @@ import threading # used to control the robot path in parallel to the observation
 import numpy as np # used for numerical calculations
 import matplotlib.pyplot as plt # used for plotting the robot position and map
 import time # used for simulation time steps
+from matplotlib.animation import FuncAnimation # for animated plotting
 
 # This file uses the vrep API library. Check that connection to Vrep can be established
 try:
@@ -38,6 +39,9 @@ clientID=vrep.simxStart('127.0.0.1', 19999, True, True, 5000, 5) # Connect to V-
 if clientID!=-1:
     print ('Connected to remote API server')
 
+
+# close all windows 
+plt.close("all")
 # Stop-Start simulation of robot
 #error_code=vrep.simxStopSimulation(clientID,vrep.simx_opmode_oneshot)
 #time.sleep(1) # wait for sim to stop
@@ -380,9 +384,79 @@ t = t - t[0]
 carpos = np.asarray(carpos)
 xtrue = carpos[:,0]
 ytrue = carpos[:,1]
-plt.plot(xtrue,ytrue,xodom,yodom,featpos[0,0],featpos[0,1],'*',featpos[1,0],featpos[1,1],'*',featpos[2,0],featpos[2,1],'*',featpos[3,0],featpos[3,1],'*',featpos[4,0],featpos[4,1],'*',featpos[5,0],featpos[5,1],'*',featpos[6,0],featpos[6,1],'*',featpos[7,0],featpos[7,1],'*',featpos[8,0],featpos[8,1],'*')
+
+# plot the true path
+#fig1, ax1 = plt.subplots()
+#plt.plot(xtrue,ytrue,xodom,yodom,featpos[0,0],featpos[0,1],'*',featpos[1,0],featpos[1,1],'*',featpos[2,0],featpos[2,1],'*',featpos[3,0],featpos[3,1],'*',featpos[4,0],featpos[4,1],'*',featpos[5,0],featpos[5,1],'*',featpos[6,0],featpos[6,1],'*',featpos[7,0],featpos[7,1],'*',featpos[8,0],featpos[8,1],'*')
+
+# Setup plotting. Remember to run in auto mode and not inline
+# https://matplotlib.org/api/animation_api.html
+#fig, ax = plt.subplots()
+#xdata, ydata = [], []
+#ln, = plt.plot([], [], 'ro', animated=True)
+#
+#def init():
+#    ax.set_xlim(0, 2*np.pi)
+#    ax.set_ylim(-1, 1)
+#    return ln,
+#
+#def update(frame):
+#    xdata.append(frame)
+#    ydata.append(np.sin(frame))
+#    ln.set_data(xdata, ydata)
+#    return ln,
+#
+#ani = FuncAnimation(fig, update, frames=np.linspace(0, 2*np.pi, 128),
+#                    init_func=init, blit=True)
+#plt.show()
+
+# plot the true path as an animation
+fig, ax = plt.subplots()
+xdata, ydata = [], []
+line, = plt.plot([], [], 'ro', animated=True)
+
+# set the axis of the plot
+def init():
+    ax.set_xlim(-2, 2)
+    ax.set_ylim(-2, 2)
+    return line,
+
+# data to use
+def update(frame):
+    xdata.append(xtrue[frame])
+    ydata.append(ytrue[frame])
+    line.set_data(xdata, ydata)
+    return line,
+
+ani = FuncAnimation(fig, update, interval=100, init_func=init, blit=True)
+
+#ani = FuncAnimation(fig, update, frames=np.linspace(0, len(xtrue), len(xtrue)),
+#                    init_func=init, blit=True)
+plt.show()
 
 
+
+#from datetime import datetime
+#from matplotlib import pyplot
+#from matplotlib.animation import FuncAnimation
+#from random import randrange
+#
+#x_data, y_data = [], []
+#
+#figure = pyplot.figure()
+#line, = pyplot.plot_date(x_data, y_data, '-')
+#
+#def update(frame):
+#    x_data.append(datetime.now())
+#    y_data.append(randrange(0, 100))
+#    line.set_data(x_data, y_data)
+#    figure.gca().relim()
+#    figure.gca().autoscale_view()
+#    return line,
+#
+#animation = FuncAnimation(figure, update, interval=200)
+#
+#pyplot.show()
 """
 continue with fastslam algorithm for feature never seen before
 think about time vector for particles or how to plot each time sample, otherwise difficult to problem solve
