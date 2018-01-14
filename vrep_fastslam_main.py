@@ -389,6 +389,8 @@ xtrue = carpos[:,0]
 ytrue = carpos[:,1]
 
 fig, ax = plt.subplots()
+pltmngr = plt.get_current_fig_manager()
+pltmngr.window.setGeometry(50,100,640, 545)
 csfont = {'fontname':'sans-serif'} # Verdana, Arial
 hfont = {'fontname':'sans-serif'}
 ax.grid(True)
@@ -442,9 +444,9 @@ def update(frame):
 anim = animation.FuncAnimation(fig, update, interval=100, frames=ns, init_func=init, blit=True)
 
 # to save the file as an animation, one needs ffmpeg. Anaconda: conda install -c conda-forge ffmpeg
-Writer = animation.writers['ffmpeg']
-writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
-anim.save('basic_animation.mp4', writer=writer)
+#Writer = animation.writers['ffmpeg']
+#writer = WRriter(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+#anim.save('basic_animation.mp4', writer=writer)
 
 # plot landmarks
 plt.plot(featpos[0,0],featpos[0,1],'m*',featpos[1,0],featpos[1,1],'m*',featpos[2,0],featpos[2,1],'m*',featpos[3,0],featpos[3,1],'m*',featpos[4,0],featpos[4,1],'m*',featpos[5,0],featpos[5,1],'m*',featpos[6,0],featpos[6,1],'m*',featpos[7,0],featpos[7,1],'m*',featpos[8,0],featpos[8,1],'m*')
