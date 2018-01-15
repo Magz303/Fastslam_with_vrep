@@ -14,7 +14,7 @@ import numpy as np # used for numerical calculations
 import matplotlib.pyplot as plt # used for plotting the robot position and map
 import time # used for simulation time steps
 import matplotlib.animation as animation # for animated plotting
-import matplotlib.patches as mpatches # used for legend
+import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
 import itertools # for reducing a 2d list to 1d list
 
 # This file uses the vrep API library. Check that connection to Vrep can be established
@@ -66,6 +66,18 @@ error_code, h_feature7 = vrep.simxGetObjectHandle(clientID, 'feature7', vrep.sim
 error_code, h_feature8 = vrep.simxGetObjectHandle(clientID, 'feature8', vrep.simx_opmode_oneshot_wait)
 error_code, h_feature9 = vrep.simxGetObjectHandle(clientID, 'feature9', vrep.simx_opmode_oneshot_wait)
 features = np.array([h_feature1, h_feature2, h_feature3, h_feature4, h_feature5, h_feature6, h_feature7, h_feature8, h_feature9])
+error_code, feat1pos = vrep.simxGetObjectPosition(clientID, h_feature1, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat2pos = vrep.simxGetObjectPosition(clientID, h_feature2, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat3pos = vrep.simxGetObjectPosition(clientID, h_feature3, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat4pos = vrep.simxGetObjectPosition(clientID, h_feature4, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat4pos = vrep.simxGetObjectPosition(clientID, h_feature4, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat5pos = vrep.simxGetObjectPosition(clientID, h_feature5, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat6pos = vrep.simxGetObjectPosition(clientID, h_feature6, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat7pos = vrep.simxGetObjectPosition(clientID, h_feature7, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat8pos = vrep.simxGetObjectPosition(clientID, h_feature8, -1,vrep.simx_opmode_oneshot_wait)
+error_code, feat9pos = vrep.simxGetObjectPosition(clientID, h_feature9, -1,vrep.simx_opmode_oneshot_wait)
+featposlist = [feat1pos, feat2pos, feat3pos, feat4pos, feat5pos,feat6pos, feat7pos, feat8pos, feat9pos]
+featpos = np.asarray(featposlist)
    
 # Intitiate required V_REP odometry information
 error_code, simtime1 = vrep.simxGetFloatSignal(clientID, 'vrep_simtime', vrep.simx_opmode_streaming) #some error_code here for some reason
@@ -98,8 +110,8 @@ except:
    print("Error: unable to start thread")
 
 # Simulation time properties
-sampletime = 5e-1
-totalsimtime = 20
+sampletime = 1e-1
+totalsimtime = 30
 starttime=time.time()
 time1 = starttime
 timevector = [[starttime]]
@@ -121,21 +133,26 @@ sensed_obj_true = np.zeros((ns,1))
 sensed_obj_handle = np.zeros((ns,1))
 sensed_obj_pos = np.zeros((ns,2))
 
+# Create arrow object list for plotting detected objects
+arrows = []
+
 # Initialize particles (landmark, particles, rows, cols)
-M = 5 # Number of particles
+M = 30 # Number of particles
 Xstart = np.array([0, 0, -np.pi/2]) # Assumed particle start position
 X = np.repeat(Xstart[:, np.newaxis], M, axis=1) # Set of particles 
 particles_xpos = [X[0,:].tolist()]
 particles_ypos = [X[1,:].tolist()]
+weights = 1/M*np.ones((1,M)) # 1XM
 mu = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_init = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_new = np.zeros((1,2,M))
 Sigma = np.zeros((1,M,3,3)) # feature position covariance related to each particle and feature
 Sigma_init = np.zeros((1,M,3,3)) # feature position covariance related to each particle and feature
 Sigma_new = np.zeros((1,M,3,3))
+mulist = []
 
 # Initialize process noise acovariance matricies
-stddev_R = 1
+stddev_R = 0.05
 R = np.eye(3) * stddev_R**2
 
 # Initialize measurement noise acovariance matricies
@@ -177,7 +194,9 @@ while (time.time() - starttime < totalsimtime):
         # Save running time
         time1 = time.time()
         timevector.append([time.time()])
-        print(time.time()-starttime)
+        print('---------------------------------------')
+        print('iter', m,'. time:',time.time()-starttime)
+        
         
         # Odometry calculation, get speed and angular frequency
         error_code, theta_L2 = vrep.simxGetJointPosition(clientID, h_motor_left, vrep.simx_opmode_buffer)
@@ -216,7 +235,12 @@ while (time.time() - starttime < totalsimtime):
             # if feature never seen before
             if (detected_object_handle not in observed_objects):
                 
-                print('...observed object ', detected_object_handle, 'is new...')  
+                # Report which feature index was detected
+                feature_index = vf.id_feature(features,detected_object_handle)
+                print('Detected feature: ', feature_index, '(new)') 
+                
+                # Create an arrow object
+                arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))
                 
                 # Add feature to feature list
                 observed_objects.append(detected_object_handle)
@@ -276,7 +300,13 @@ while (time.time() - starttime < totalsimtime):
             # else if feature has been seen before
             else:
                 j = observed_objects.index(detected_object_handle)
-                print('...observed object ', detected_object_handle, 'have been seen before...')  
+                
+                # Report which feature index was detected
+                feature_index = vf.id_feature(features,detected_object_handle)                
+                print('Detected feature: ', feature_index)  
+                
+                # Create an arrow object
+                arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))
                 
                 # measurement prediction based on particle set X and mean feature position mu
                 zhat = vf.observation_model_zhat(Xbar,mu,j,Qt) # 2XM
@@ -304,7 +334,7 @@ while (time.time() - starttime < totalsimtime):
                
                 # Add extra row to measurement error for Kalman gain multiplication
                 #zerror = np.concatenate((z,np.zeros((1,M))),axis=0) # 3XM, but I want it MX3X1
-                nu = np.transpose(nu.reshape(2,5,1),(1,0,2)) # MX2X1
+                nu = np.transpose(nu.reshape(2,M,1),(1,0,2)) # MX2X1
                 
                 # update mean. Is this really correct??? mixing coordinates? features x,y. nu is in r,theta. Kalman gain ???.
                 mu[j,:,:] = mu[j,:,:] + (K @ nu).T[:,:2,:] # NX2XM # think about changing to NXMX2X1
@@ -322,7 +352,7 @@ while (time.time() - starttime < totalsimtime):
                 D = nuT @ Qinv @ nu # MX1X1
                 
                 # importance factors
-                weights_not_normalized = ata*np.exp(-0.5*D.reshape(1,5)) # 1XM
+                weights_not_normalized = ata*np.exp(-0.5*D.reshape(1,M)) # 1XM
                 
                 # normalize the weights
                 weightsum = np.sum(weights_not_normalized)
@@ -335,6 +365,9 @@ while (time.time() - starttime < totalsimtime):
             # mean and covariance the same as earlier time step
             mu = mu
             Sigma = Sigma
+            
+            # Create a dummy arrow
+            arrows.append(vf.add_arrow_object(m,np.zeros((ns,3)),np.zeros((10,3)),0))
                        
         # Resampling  
         
@@ -370,18 +403,7 @@ while (time.time() - starttime < totalsimtime):
 
 # plot true path and map features
 time.sleep(0.2)
-error_code, feat1pos = vrep.simxGetObjectPosition(clientID, h_feature1, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat2pos = vrep.simxGetObjectPosition(clientID, h_feature2, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat3pos = vrep.simxGetObjectPosition(clientID, h_feature3, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat4pos = vrep.simxGetObjectPosition(clientID, h_feature4, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat4pos = vrep.simxGetObjectPosition(clientID, h_feature4, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat5pos = vrep.simxGetObjectPosition(clientID, h_feature5, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat6pos = vrep.simxGetObjectPosition(clientID, h_feature6, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat7pos = vrep.simxGetObjectPosition(clientID, h_feature7, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat8pos = vrep.simxGetObjectPosition(clientID, h_feature8, -1,vrep.simx_opmode_oneshot_wait)
-error_code, feat9pos = vrep.simxGetObjectPosition(clientID, h_feature9, -1,vrep.simx_opmode_oneshot_wait)
-featpos = [feat1pos, feat2pos, feat3pos, feat4pos, feat5pos,feat6pos, feat7pos, feat8pos, feat9pos]
-featpos = np.asarray(featpos)
+
 t = np.asarray(timevector)
 t = t - t[0]
 carpos = np.asarray(carpos)
@@ -400,9 +422,9 @@ plt.xlabel('x',**hfont)
 xdata, ydata = [], []
 xdata2, ydata2 = [], []
 xdata3, ydata3 = [], []
-line, = plt.plot([], [], 'ro', animated=True)
-line2, = plt.plot([], [], 'g*', animated=True)
-line3, = plt.plot([], [], 'b+', animated=True)
+line, = plt.plot([], [], 'ro', animated=True) # true car position
+line2, = plt.plot([], [], 'g*', animated=True) # odometry information
+line3, = plt.plot([], [], 'b+', animated=True) # particle information
 
 
 
@@ -419,29 +441,40 @@ green_patch = mpatches.Patch(color='green', label='odometry information')
 blue_patch = mpatches.Patch(color='blue', label='particles')
 plt.legend(handles=[red_patch, green_patch , blue_patch])
 
-#particles_xpos1d = list(itertools.chain.from_iterable(particles_xpos))
-#particles_ypos1d = list(itertools.chain.from_iterable(particles_xpos))
+# Add arrows to plot
+for elements in arrows:
+    elements.set_visible(False) 
+    ax.add_artist(elements)
 
-# set the axis of the plot
-def init():
+# Init animation plot
+def init_animation():
+# set the axis of the plot    
     ax.set_xlim(-3, 3)
     ax.set_ylim(-3, 3)
-    return line,
+    return line, 
 
 # data to use
-def update(frame):
+def update_animation(frame):
     xdata.append(xtrue[frame])
     ydata.append(ytrue[frame])
     xdata2.append(xodom[frame])
     ydata2.append(yodom[frame]) 
-    xdata3.append(particles_xpos[frame])
-    ydata3.append(particles_ypos[frame]) 
+    xdata3 = particles_xpos[frame]
+    ydata3 = particles_ypos[frame]
     line.set_data(xdata, ydata)
     line2.set_data(xdata2, ydata2)   
     line3.set_data(xdata3, ydata3)
-    return line, line2, line3
+    
+    # Add arrows
+    for elements in arrows:
+        elements.set_visible(False)    
+    
+    if sensed_obj_true[frame]:
+        arrows[frame].set_visible(True)
+    
+    return line, line2, line3, arrows[frame]
 
-anim = animation.FuncAnimation(fig, update, interval=100, frames=ns, init_func=init, blit=True)
+anim = animation.FuncAnimation(fig, update_animation, interval=100, frames=ns, init_func=init_animation, blit=True)
 
 # to save the file as an animation, one needs ffmpeg. Anaconda: conda install -c conda-forge ffmpeg
 #Writer = animation.writers['ffmpeg']
@@ -449,11 +482,46 @@ anim = animation.FuncAnimation(fig, update, interval=100, frames=ns, init_func=i
 #anim.save('basic_animation.mp4', writer=writer)
 
 # plot landmarks
+featwidth = 0.2
+featheight = 0.2
 plt.plot(featpos[0,0],featpos[0,1],'m*',featpos[1,0],featpos[1,1],'m*',featpos[2,0],featpos[2,1],'m*',featpos[3,0],featpos[3,1],'m*',featpos[4,0],featpos[4,1],'m*',featpos[5,0],featpos[5,1],'m*',featpos[6,0],featpos[6,1],'m*',featpos[7,0],featpos[7,1],'m*',featpos[8,0],featpos[8,1],'m*')
+r1=mpatches.Rectangle(xy=(featpos[0,0]-featwidth/2,featpos[0,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r2=mpatches.Rectangle(xy=(featpos[1,0]-featwidth/2,featpos[1,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r3=mpatches.Rectangle(xy=(featpos[2,0]-featwidth/2,featpos[2,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r4=mpatches.Rectangle(xy=(featpos[3,0]-featwidth/2,featpos[3,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r5=mpatches.Rectangle(xy=(featpos[4,0]-featwidth/2,featpos[4,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r6=mpatches.Rectangle(xy=(featpos[5,0]-featwidth/2,featpos[5,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r7=mpatches.Rectangle(xy=(featpos[6,0]-featwidth/2,featpos[6,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r8=mpatches.Rectangle(xy=(featpos[7,0]-featwidth/2,featpos[7,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+r9=mpatches.Rectangle(xy=(featpos[8,0]-featwidth/2,featpos[8,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
+ax.add_patch(r1)
+ax.add_patch(r2)
+ax.add_patch(r3)
+ax.add_patch(r4)
+ax.add_patch(r5)
+ax.add_patch(r6)
+ax.add_patch(r7)
+ax.add_patch(r8)
+ax.add_patch(r9)
+
+def label(xy, text):
+    y = xy[1] - 0.3  # shift y-value for label so that it's below the artist
+    plt.text(xy[0], y, text, ha="center", family='sans-serif', size=10, color = 'gray')
+label((featpos[0,0],featpos[0,1]),'feat 1')
+label((featpos[1,0],featpos[1,1]),'feat 2')
+label((featpos[2,0],featpos[2,1]),'feat 3')
+label((featpos[3,0],featpos[3,1]),'feat 4')
+label((featpos[4,0],featpos[4,1]),'feat 5')
+label((featpos[5,0],featpos[5,1]),'feat 6')
+label((featpos[6,0],featpos[6,1]),'feat 7')
+label((featpos[7,0],featpos[7,1]),'feat 8')
+label((featpos[8,0],featpos[8,1]),'feat 9')
+
+# Arrow
+#a1 = mpatches.Arrow(x = -1, y=1, dx=1, dy=2, width=0.2)
+#ax.add_patch(a1)
 
 plt.show()
-
-
 
 #from datetime import datetime
 #from matplotlib import pyplot

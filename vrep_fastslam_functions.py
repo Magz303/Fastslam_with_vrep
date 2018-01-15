@@ -9,6 +9,20 @@ Created on Sun Jan  7 00:35:16 2018
 Containts functions and simplified test functions for vrep_fastslam
 """
 import numpy as np
+import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
+
+def add_arrow_object(iter,carpos,featpos,feature_index):
+    carpos = np.asarray(carpos)
+    feature_index = feature_index -1
+    a = mpatches.Arrow(x=carpos[iter,0], y=carpos[iter,1], dx=featpos[feature_index,0]-carpos[iter,0],dy=featpos[feature_index,1]-carpos[iter,1], width = 0.2, color = 'red')
+    return a
+    
+
+# USED IN SIM!
+def id_feature(features,sensed_object):
+    # This function retrieves the index of the observed object handle in vrep
+    itemindex = np.where(features==sensed_object)
+    return int(itemindex[0])+1
 
 # USED IN SIM!
 def init_mean_from_z(X, z): # see p.320
