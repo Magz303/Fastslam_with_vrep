@@ -64,7 +64,8 @@ def calculate_measurement_jacobian(X,mu,j):
     # This function calculates the jacobian of the observation model for a given
     # feature and the particle set. The Jacobian is used
     # later to obtain the measurement covariance matrix Sigma = HxQxH.T  
-    # for a given feature and the particle set
+    # for a given feature and the particle set.
+    # The derivative is based on the feature x,y and not the robot itself which has x,y and theta
     # Inputs:
     #           X(t)    3XM estimated states [x,y,theta]'   
     #           mu(t)   NX2XM observed mean position of features [x,y]'       
@@ -77,46 +78,31 @@ def calculate_measurement_jacobian(X,mu,j):
     muy = mu[j,1,:] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
     Xx = X[0,:] # Extract the x position of all particles
     Xy = X[1,:] # Extract the y position of all particles
-    Xtheta = X[2,:] # Extract the theta angle of all particles
     q = (mux - Xx)**2 +(muy - Xy)**2 # 
 
     # linearization of observation model z = [r theta] where range is first
-    dhr_dx = -(Xx-mux)/ np.sqrt(q)
-    dhr_dy = -(Xy-muy)/ np.sqrt(q)
-    dhr_dtheta = np.zeros((1,M))
+    # (range = np.sqrt((mux-Xx)**2 + (mux-Xy)**2) )
+    # (theta = np.arctan2(muy-Xy,mux-Xx) - Xtheta )
+    
+    # range linearization
+    dhr_dmux = (mux-Xx) / np.sqrt(q)
+    dhr_dmuy = (muy-Xy) / np.sqrt(q)
     
     # angle linearization
-    dhtheta_dx = (Xx-mux)/ q #1XM
-    dhtheta_dy = -(Xy-muy)/ q
-    dhtheta_dtheta = -1*np.ones((1,M))
+    dhtheta_dmux = -(mux-Xx) / q #1XM
+    dhtheta_dmuy = (muy-Xy) / q
     
-    # CONSIDER: Using additional row
-    tol = 1e-6
-    dzero = np.ones((1,1,M))*tol
-
-    # Jacobian should cover all particles MX3X3. 
-    # I have 1X5, 1X5, ...
-    # I want 1X1X5, 1X1X5,... thereafter concatenate
-    #    dhr_dx2 = dhr_dx.reshape(1,1,M)
-    #    dhr_dy2 = dhr_dy.reshape(1,1,M)
-    #    dhr_dtheta2 = dhr_dtheta.reshape(1,1,M)    
-    #    dhtheta_dx2 = dhtheta_dx.reshape(1,1,M)
-    #    dhtheta_dy2 = dhtheta_dy.reshape(1,1,M)
-    #    dhtheta_dtheta = dhtheta_dtheta.reshape(1,1,M)
-    #    dzero2 = dzero.reshape(1,1,M)
-    #    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=0).T
-    #    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=0).T
-    #    H3 = np.concatenate((dzero2,dzero2,dzero2),axis=0).T
-    #        H = np.concatenate((H1,H2), axis=1) # MX2X3
-    dhr_dx2 = dhr_dx.reshape(M,1,1)
-    dhr_dy2 = dhr_dy.reshape(M,1,1)
-    dhr_dtheta2 = dhr_dtheta.reshape(M,1,1)    
-    dhtheta_dx2 = dhtheta_dx.reshape(M,1,1)
-    dhtheta_dy2 = dhtheta_dy.reshape(M,1,1)
-    dhtheta_dtheta = dhtheta_dtheta.reshape(M,1,1)
-    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=2)
-    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=2)
-    H = np.concatenate((H1,H2), axis=1) # MX2X3
+    dhr_dmux2 = dhr_dmux.reshape(M,1,1)
+    dhr_dmuy2 = dhr_dmuy.reshape(M,1,1)
+#    dhr_dtheta2 = dhr_dtheta.reshape(M,1,1)    
+    dhtheta_dmux2 = dhtheta_dmux.reshape(M,1,1)
+    dhtheta_dmuy2 = dhtheta_dmuy.reshape(M,1,1)
+#    dhtheta_dtheta = dhtheta_dtheta.reshape(M,1,1)
+#    H1 = np.concatenate((dhr_dx2,dhr_dy2,dhr_dtheta2),axis=2)
+#    H2 = np.concatenate((dhtheta_dx2,dhtheta_dy2,dhtheta_dtheta),axis=2)
+    H1 = np.concatenate((dhr_dmux2,dhr_dmuy2),axis=2)
+    H2 = np.concatenate((dhtheta_dmux2,dhtheta_dmuy2),axis=2)
+    H = np.concatenate((H1,H2), axis=1) # MX2X2
     return H
 
 

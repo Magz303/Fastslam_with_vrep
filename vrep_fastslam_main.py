@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt # used for plotting the robot position and map
 import time # used for simulation time steps
 import matplotlib.animation as animation # for animated plotting
 import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
-import itertools # for reducing a 2d list to 1d list
+#import itertools # for reducing a 2d list to 1d list
 
 # This file uses the vrep API library. Check that connection to Vrep can be established
 try:
@@ -110,8 +110,8 @@ except:
    print("Error: unable to start thread")
 
 # Simulation time properties
-sampletime = 1e-1
-totalsimtime = 30
+sampletime = 5e-1
+totalsimtime = 20
 starttime=time.time()
 time1 = starttime
 timevector = [[starttime]]
@@ -146,9 +146,9 @@ weights = 1/M*np.ones((1,M)) # 1XM
 mu = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_init = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_new = np.zeros((1,2,M))
-Sigma = np.zeros((1,M,3,3)) # feature position covariance related to each particle and feature
-Sigma_init = np.zeros((1,M,3,3)) # feature position covariance related to each particle and feature
-Sigma_new = np.zeros((1,M,3,3))
+Sigma = np.zeros((1,M,2,2)) # feature position covariance related to each particle and feature
+Sigma_init = np.zeros((1,M,2,2)) # feature position covariance related to each particle and feature
+Sigma_new = np.zeros((1,M,2,2))
 mulist = []
 
 # Initialize process noise acovariance matricies
@@ -168,7 +168,7 @@ QtSinv = np.linalg.inv(QtS)
 observed_objects = []
 
 # Initialize identify matrix
-I = np.repeat(np.eye(3)[np.newaxis, :, : ], M, axis=0)
+I = np.repeat(np.eye(2)[np.newaxis, :, : ], M, axis=0)
 
 # Initialize counter
 m = 0 # counter for main loop
@@ -284,8 +284,8 @@ while (time.time() - starttime < totalsimtime):
                 # QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 3X3XM
 
                 # Initialize covariance 
-                #Sigma_init[0,:,:,:]  = np.linalg.inv(H_T @ QtSinv @ H) # 1XMX3X3
-                Sigma_init[0,:,:,:]  = (H_T @ QtSinv @ H)
+                Sigma_init[0,:,:,:]  = np.linalg.inv(H_T @ QtSinv @ H) # 1XMX3X3
+#                Sigma_init[0,:,:,:]  = (H_T @ QtSinv @ H)
                 
                 
                 # Add to list of sigma covariance of features
@@ -342,7 +342,7 @@ while (time.time() - starttime < totalsimtime):
                 # update covariance
                 Sigma[j,:,:,:] = (I - K@H) @ Sigma[j,:,:,:]# NXMX3X3
                 
-                # importance factor amplitude. Correct with det(Q)? consider checking H
+                # importance factor amplitude.
                 ata = 1/np.sqrt(np.pi*2*np.linalg.det(Q)) # 1XM
                 
                 # Transpose innovation nu
@@ -455,10 +455,14 @@ def init_animation():
 
 # data to use
 def update_animation(frame):
-    xdata.append(xtrue[frame])
-    ydata.append(ytrue[frame])
-    xdata2.append(xodom[frame])
-    ydata2.append(yodom[frame]) 
+#    xdata.append(xtrue[frame])
+#    ydata.append(ytrue[frame])
+#    xdata2.append(xodom[frame])
+#    ydata2.append(yodom[frame]) 
+    xdata = xtrue[frame]
+    ydata = ytrue[frame]
+    xdata2 = xodom[frame]
+    ydata2 = yodom[frame]
     xdata3 = particles_xpos[frame]
     ydata3 = particles_ypos[frame]
     line.set_data(xdata, ydata)
@@ -474,7 +478,7 @@ def update_animation(frame):
     
     return line, line2, line3, arrows[frame]
 
-anim = animation.FuncAnimation(fig, update_animation, interval=100, frames=ns, init_func=init_animation, blit=True)
+anim = animation.FuncAnimation(fig, update_animation, interval=200, frames=ns, init_func=init_animation, blit=True)
 
 # to save the file as an animation, one needs ffmpeg. Anaconda: conda install -c conda-forge ffmpeg
 #Writer = animation.writers['ffmpeg']
