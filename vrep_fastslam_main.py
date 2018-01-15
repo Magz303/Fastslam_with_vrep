@@ -149,7 +149,10 @@ mu_new = np.zeros((1,2,M))
 Sigma = np.zeros((1,M,2,2)) # feature position covariance related to each particle and feature
 Sigma_init = np.zeros((1,M,2,2)) # feature position covariance related to each particle and feature
 Sigma_new = np.zeros((1,M,2,2))
-mulist = []
+
+# Keep track of the mean values for plotting of landmarks
+xmu = []
+ymu = []
 
 # Initialize process noise acovariance matricies
 stddev_R = 0.05
@@ -157,8 +160,8 @@ R = np.eye(3) * stddev_R**2
 
 # Initialize measurement noise acovariance matricies
 stddev_Qt = 0.1
-stddev_range = 0.1
-stddev_bearing = 0.01
+stddev_range = 1
+stddev_bearing = 1
 Qt = np.eye(2) * stddev_Qt
 Qt = np.array([[stddev_range, 0],[0, stddev_bearing]])
 QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0)
@@ -263,34 +266,34 @@ while (time.time() - starttime < totalsimtime):
                     mu = np.concatenate((mu,mu_init),axis=0) # NX2XM
                 
                 # calculatione observation model jacobian 
-                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # # MX2X3. Only for this feature 
+                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # # MX2X2. Only for this feature 
                 
-                # Make a transpose along the 3x3 dimension for each particle
-                H_T = np.transpose(H,(1,0,2)) # MX3X2
+                # Make a transpose along the 2x2 dimension for each particle
+                H_T = np.transpose(H,(1,0,2)) # MX2X2
                 
                 # Inverse of jacobian of measurement model 
                 # https://stackoverflow.com/questions/41850712/compute-inverse-of-2d-arrays-along-the-third-axis-in-a-3d-array-without-loops
                 # Hinv = np.linalg.inv(H.T).T
                 
-                # Make a transpose along the 2x3 dimension for each particle M
-                H_T = np.transpose(H,(0,2,1)) # MX3X2
+                # Make a transpose along the 2x2 dimension for each particle M
+                H_T = np.transpose(H,(0,2,1)) # MX2X2
                 
                 # Invert Q measurement noise matrix
-                # Qinv = np.linalg.inv(Qt) # 3X3
+                # Qinv = np.linalg.inv(Qt) # 2X2
                 
                 # Scale the Q matrix for each particle
                 # indexing with np.newaxis inserts a new 3rd dimension, which we then repeat the
                 # array along, (you can achieve the same effect by indexing with None, see below)
-                # QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 3X3XM
+                # QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 2X2XM
 
                 # Initialize covariance 
-                Sigma_init[0,:,:,:]  = np.linalg.inv(H_T @ QtSinv @ H) # 1XMX3X3
+                Sigma_init[0,:,:,:]  = np.linalg.inv(H_T @ QtSinv @ H) # 1XMX2X2
 #                Sigma_init[0,:,:,:]  = (H_T @ QtSinv @ H)
                 
                 
                 # Add to list of sigma covariance of features
                 if j == 0:
-                    Sigma = Sigma_init #MX3X3
+                    Sigma = Sigma_init #MX2X2
                 else:
                     Sigma = np.concatenate((Sigma,Sigma_init),axis=0) # NXMX3X3              
                 
@@ -312,10 +315,10 @@ while (time.time() - starttime < totalsimtime):
                 zhat = vf.observation_model_zhat(Xbar,mu,j,Qt) # 2XM
                 
                 # calculate jacobian
-                H = vf.calculate_measurement_jacobian(X,mu,j) # MX2X3
+                H = vf.calculate_measurement_jacobian(X,mu,j) # MX2X2
                 
                 # Make a transpose along the 3x3 dimension for each particle
-                H_T = np.transpose(H,(0,2,1)) # MX3X2     
+                H_T = np.transpose(H,(0,2,1)) # MX2X2     
                 
                 # Measurement covariance (not the same as Qt measurement covariance noise)
                 Q = H @ Sigma[j,:,:,:] @ H_T + QtS # MX2X2
@@ -337,10 +340,10 @@ while (time.time() - starttime < totalsimtime):
                 nu = np.transpose(nu.reshape(2,M,1),(1,0,2)) # MX2X1
                 
                 # update mean. Is this really correct??? mixing coordinates? features x,y. nu is in r,theta. Kalman gain ???.
-                mu[j,:,:] = mu[j,:,:] + (K @ nu).T[:,:2,:] # NX2XM # think about changing to NXMX2X1
+                mu[j,:,:] = mu[j,:,:] + (K @ nu).T # NX2XM # think about changing to NXMX2X1
                 
                 # update covariance
-                Sigma[j,:,:,:] = (I - K@H) @ Sigma[j,:,:,:]# NXMX3X3
+                Sigma[j,:,:,:] = (I - K@H) @ Sigma[j,:,:,:]# NXMX2X2
                 
                 # importance factor amplitude.
                 ata = 1/np.sqrt(np.pi*2*np.linalg.det(Q)) # 1XM
@@ -397,6 +400,11 @@ while (time.time() - starttime < totalsimtime):
         # save data for plotting
         particles_xpos.append(X[0,:].tolist())
         particles_ypos.append(X[1,:].tolist())
+        
+        # take the average of the mu for each landmark
+        muavg = np.mean(mu,axis=2)
+        xmu.append(muavg[:,0].tolist())
+        ymu.append(muavg[:,1].tolist())
 
         # Before ending loop, increment iteration 
         m = m + 1
@@ -422,9 +430,11 @@ plt.xlabel('x',**hfont)
 xdata, ydata = [], []
 xdata2, ydata2 = [], []
 xdata3, ydata3 = [], []
+xdata4, ydata4 = [], []
 line, = plt.plot([], [], 'ro', animated=True) # true car position
 line2, = plt.plot([], [], 'g*', animated=True) # odometry information
 line3, = plt.plot([], [], 'b+', animated=True) # particle information
+line4, = plt.plot([], [], 'm*', animated=True) # landmark mean information for one particle
 
 
 
@@ -465,10 +475,12 @@ def update_animation(frame):
     ydata2 = yodom[frame]
     xdata3 = particles_xpos[frame]
     ydata3 = particles_ypos[frame]
+    xdata4 = xmu[frame]
+    ydata4 = ymu[frame]    
     line.set_data(xdata, ydata)
     line2.set_data(xdata2, ydata2)   
     line3.set_data(xdata3, ydata3)
-    
+    line4.set_data(xdata4, ydata4)
     # Add arrows
     for elements in arrows:
         elements.set_visible(False)    
@@ -476,7 +488,7 @@ def update_animation(frame):
     if sensed_obj_true[frame]:
         arrows[frame].set_visible(True)
     
-    return line, line2, line3, arrows[frame]
+    return line, line2, line3, line4, arrows[frame]
 
 anim = animation.FuncAnimation(fig, update_animation, interval=200, frames=ns, init_func=init_animation, blit=True)
 
