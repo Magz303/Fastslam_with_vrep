@@ -11,13 +11,29 @@ Containts functions and simplified test functions for vrep_fastslam
 import numpy as np
 import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
 
+def feature_pos_and_cov(X,mu,Sigma,k):
+    mu_mean = np.mean(mu,axis=2)
+    X_mean = np.mean(X,axis=1)
+    Sigma_mean = np.mean(Sigma,axis=1)
+
+    r = np.sqrt((mu_mean[k,0] - X_mean[0])**2 +(mu_mean[k,1] - X_mean[1])**2) # range to feature for each particle
+#    theta = np.arctan2(mu_mean[k,1]-X_mean[1] , mu_mean[k,0]-X_mean[0]) - X_mean[2] # angle to observed feature for each particle
+    theta = np.arctan2(mu_mean[k,0]-X_mean[0] , mu_mean[k,1]-X_mean[1])
+    theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi    
+    
+#    xfeat_world = X_mean[0] + r * np.cos(X_mean[2]+theta) # X position of particle plus x-distance to feature related to the particle
+#    yfeat_world = X_mean[1] + r * np.sin(X_mean[2]+theta) # the same for Y
+    xfeat_world = X_mean[0] + r * np.sin(theta + X_mean[2]) # X position of particle plus x-distance to feature related to the particle
+    yfeat_world = X_mean[1] + r * np.cos(theta + X_mean[2])
+    return xfeat_world, yfeat_world
+
+# USED IN SIM!
 def add_arrow_object(iter,carpos,featpos,feature_index):
     carpos = np.asarray(carpos)
     feature_index = feature_index -1
     a = mpatches.Arrow(x=carpos[iter,0], y=carpos[iter,1], dx=featpos[feature_index,0]-carpos[iter,0],dy=featpos[feature_index,1]-carpos[iter,1], width = 0.2, color = 'red')
     return a
     
-
 # USED IN SIM!
 def id_feature(features,sensed_object):
     # This function retrieves the index of the observed object handle in vrep
@@ -36,8 +52,10 @@ def init_mean_from_z(X, z): # see p.320
     #           mu_init     2XM position of the feature related to each particle
     M = np.size(X[0,:])     # Number of particles in particle set  
     mu_init = np.zeros((2,M))
-    mu_init[0,:] = X[0,:] + z[0,:] * np.cos(X[2,:]+z[1,:]) # X position of particle plus x-distance to feature related to the particle
-    mu_init[1,:] = X[1,:] + z[0,:] * np.sin(X[2,:]+z[1,:]) # the same for Y
+#    mu_init[0,:] = X[0,:] + z[0,:] * np.cos(X[2,:]+z[1,:]) # X position of particle plus x-distance to feature related to the particle
+#    mu_init[1,:] = X[1,:] + z[0,:] * np.sin(X[2,:]+z[1,:]) # the same for Y
+    mu_init[0,:] = X[0,:] + z[0,:] * np.sin(X[2,:]+z[1,:]) # X position of particle plus x-distance to feature related to the particle
+    mu_init[1,:] = X[1,:] + z[0,:] * np.cos(X[2,:]+z[1,:]) # the same for Y    
     return mu_init
 
 
@@ -137,6 +155,27 @@ def observation_model_zhat(X,mu,j,Q): # maybe remove Q and j here....
     z = zmeas + diffusion[:2,:] # estimated states = old states + motion + diffusion    
     return z    
 
+def z_from_detectection(X,observed_objects_pos): # maybe remove Q and j here....
+    # This function implements the observation model and calculates the range and angle z for 
+    # a given feature j in [x,y] coordinates W and particle set X
+    # Note: The bearing theta lies in the interval [-pi,pi) in relation to the particle set X
+    # Inputs:
+    #           X           3XM previous particle set representing the states and the weights [x,y,theta]'
+    #           W           2XN coordinates of the features in x,y in tth time 
+    #           j           1X1 index of the feature being matched to the measurement observation
+    #           Q           2X2 measurement covariance noise   
+    # Outputs:  
+    #           z           2XM observation function for range-bearing measurement, [r, theta]'
+    M = np.size(X[0,:])     # Number of particles in particle set    
+    Featx = np.ones((1,M)) * observed_objects_pos[0,0] # Extract one feature j and create a matrix shape for creating a distance calculation in x for all particles
+    Featy = np.ones((1,M)) * observed_objects_pos[1,0] # Extract one feature j and create a matrix shape for creating a distance calculation in y for all particles
+    r = np.sqrt((Featx)**2 +(Featy)**2) # range to feature for each particle
+    theta = np.arctan2(Featx,Featy) # angle to observed feature for each particle
+    theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi
+    zmeas = np.concatenate((r, theta_lim), axis = 0)
+    z = zmeas# + diffusion[:2,:] # estimated states = old states + motion + diffusion    
+    return zmeas
+
 def observation_model(X,W,j,Q): # maybe remove Q and j here....
     # This function implements the observation model and calculates the range and angle z for 
     # a given feature j in [x,y] coordinates W and particle set X
@@ -162,7 +201,7 @@ def observation_model(X,W,j,Q): # maybe remove Q and j here....
     rtheta_stddev2 = np.diag(np.sqrt(Q)) # obtain standard deviation square of process noise (1-dimensional array)
     diffusion_normal = np.random.standard_normal((2,M))  # Normal distribution with standard deviation 1 
     diffusion = diffusion_normal * rtheta_stddev2.reshape(2,1) # Normal distribution with standard deviation according to process noise covariance R (reshape sigma to get 3 rows and 1 column for later matrix inner product multiplication)
-    z = zmeas + diffusion[:2,:] # estimated states = old states + motion + diffusion    
+    z = zmeas# + diffusion[:2,:] # estimated states = old states + motion + diffusion    
     return z
 
 def test_observation_model():
@@ -195,7 +234,8 @@ def sample_pose(X, v, w, R, delta_t):
     xytheta_dim = 3 # Number of states of each particle 
     Xbar = np.zeros((3,M))
     theta_prev = X[2,:]  # theta angle at previous time step
-    xy_predmotion = delta_t * np.array([ v * np.cos(theta_prev), v * np.sin(theta_prev) ]) # motion model on x and y for each particle  
+#    xy_predmotion = delta_t * np.array([ v * np.cos(theta_prev), v * np.sin(theta_prev) ]) # motion model on x and y for each particle  
+    xy_predmotion = delta_t * np.array([ -v * np.sin(theta_prev), v * np.cos(theta_prev) ]) # motion model on x and y for each particle  
     theta_predmotion = delta_t * w * np.ones((1,M))  #motion model for the angle of each particle 
     xytheta_predmotion = np.concatenate((xy_predmotion, theta_predmotion), axis = 0) # combine the complete motion model x,y and theta into one matrix 
     xytheta_sigma = np.diag(np.sqrt(R)) # obtain standard deviation of process noise (1-dimensional array)
@@ -287,8 +327,8 @@ def predict_motion_xytheta(x, y, theta, v, w, delta_t):
     #           x_predmotion(t)                1X1 prediction of the new state x-direction
     #           y_predmotion(t)                1X1 prediction of the new state y-direction
     #           theta_predmotion(t)            1X1 prediction of the new state theta-angle    
-    x_predmotion = x + v*delta_t*np.cos(theta)
-    y_predmotion = y + v*delta_t*np.sin(theta)
+    x_predmotion = x - v*delta_t*np.sin(theta)
+    y_predmotion = y + v*delta_t*np.cos(theta)
     theta_predmotion = (((theta + w*delta_t) + np.pi) % (2*np.pi)) - np.pi # set angle between -pi and pi
     return x_predmotion, y_predmotion, theta_predmotion
     

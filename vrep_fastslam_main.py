@@ -122,8 +122,10 @@ ns = int(totalsimtime/sampletime)
 # Intialize odometry needed information
 xodom = np.zeros((ns,1))
 yodom = np.zeros((ns,1))
+xodom[0] = 0
+yodom[0] = 0.5
 theta = np.zeros((ns,1))
-theta[0] = -np.pi/2 #start position
+theta[0] = -np.pi #start position
 w = np.zeros((ns,1))
 v = np.zeros((ns,1))
 dtsim = np.zeros((ns,1))
@@ -131,17 +133,18 @@ dtsim = np.zeros((ns,1))
 # Initialize sensing
 sensed_obj_true = np.zeros((ns,1))
 sensed_obj_handle = np.zeros((ns,1))
-sensed_obj_pos = np.zeros((ns,2))
+sensed_obj_pos = np.zeros((ns,3))
 
 # Create arrow object list for plotting detected objects
 arrows = []
 
 # Initialize particles (landmark, particles, rows, cols)
 M = 30 # Number of particles
-Xstart = np.array([0, 0, -np.pi/2]) # Assumed particle start position
+Xstart = np.array([0, 0.5, -np.pi]) # Assumed particle start position
 X = np.repeat(Xstart[:, np.newaxis], M, axis=1) # Set of particles 
 particles_xpos = [X[0,:].tolist()]
 particles_ypos = [X[1,:].tolist()]
+particles_theta = [X[1,:].tolist()]
 weights = 1/M*np.ones((1,M)) # 1XM
 mu = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
 mu_init = np.zeros((1,2,M)) # features mean position related to each particle 1X2XM
@@ -151,11 +154,18 @@ Sigma_init = np.zeros((1,M,2,2)) # feature position covariance related to each p
 Sigma_new = np.zeros((1,M,2,2))
 
 # Keep track of the mean values for plotting of landmarks
-xmu = []
-ymu = []
+xmu_mean = []
+ymu_mean = []
+xpos_mean = []
+ypos_mean = []
+theta_mean = []
+Sigma_mean = []
+xfeatworld = []
+yfeatworld = []
 
 # Initialize process noise acovariance matricies
 stddev_R = 0.05
+#stddev_R = 0.01
 R = np.eye(3) * stddev_R**2
 
 # Initialize measurement noise acovariance matricies
@@ -211,11 +221,15 @@ while (time.time() - starttime < totalsimtime):
                        
         # Extract sensor information for this time step
         error_code, detection_state, detected_point, detected_object_handle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, h_prox_sensor, vrep.simx_opmode_buffer)    
+#        detected_point[0] = detected_point[0] # reference frame of robot is -x, -y in relation to robot...
+#        detected_point[1] = detected_point[1]
+        detected_pointxy = [detected_point[1], detected_point[2]]
         sensed_obj_true[m] = detection_state
         if (sensed_obj_true[m]):
             sensed_obj_handle[m] = detected_object_handle
-            sensed_obj_pos[m,0] = detected_point[0]
-            sensed_obj_pos[m,1] = detected_point[1]
+            sensed_obj_pos[m,1] = detected_point[1] #x
+            sensed_obj_pos[m,2] = detected_point[2] #y
+            sensed_obj_pos[m,0] = detected_point[0] #z
         
         # Save exact car location for reference
         error_code, carpos2 = vrep.simxGetObjectPosition(clientID, h_car, -1, vrep.simx_opmode_buffer)
@@ -253,8 +267,8 @@ while (time.time() - starttime < totalsimtime):
              
                 # Calculate range and angle to feature related to each particle in the particle set
                 # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
-                observed_objects_pos = np.asarray(detectedPoint[0:2]).reshape(2,1) #2X1
-                z = vf.observation_model(Xbar,observed_objects_pos,j,Qt) # 2XM
+                observed_objects_pos = np.asarray(detected_pointxy[0:2]).reshape(2,1) #2X1
+                z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM
                 
                 # Initialize mean x,y position of feature based on range and angle in z
                 mu_init[0,:,:] = vf.init_mean_from_z(Xbar, z) # 1X2XM
@@ -303,6 +317,11 @@ while (time.time() - starttime < totalsimtime):
             # else if feature has been seen before
             else:
                 j = observed_objects.index(detected_object_handle)
+                
+                # Calculate range and angle to feature related to each particle in the particle set
+                # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
+                observed_objects_pos = np.asarray(detected_pointxy[0:2]).reshape(2,1) #2X1
+                z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM                
                 
                 # Report which feature index was detected
                 feature_index = vf.id_feature(features,detected_object_handle)                
@@ -400,11 +419,31 @@ while (time.time() - starttime < totalsimtime):
         # save data for plotting
         particles_xpos.append(X[0,:].tolist())
         particles_ypos.append(X[1,:].tolist())
+        particles_theta.append(X[2,:].tolist())
         
         # take the average of the mu for each landmark
-        muavg = np.mean(mu,axis=2)
-        xmu.append(muavg[:,0].tolist())
-        ymu.append(muavg[:,1].tolist())
+        mu_mean = np.mean(mu,axis=2)
+        xmu_mean.append(mu_mean[:,0].tolist())
+        ymu_mean.append(mu_mean[:,1].tolist())
+        
+        # take the average of the robot position
+        X_mean = np.mean(X,axis=1)
+        xpos_mean.append(X_mean[0].tolist())
+        ypos_mean.append(X_mean[1].tolist())
+        theta_mean.append(X_mean[2].tolist())
+        
+        Sigma_mean_iter = np.mean(Sigma,axis=1)
+        Sigma_mean.append(Sigma_mean_iter.tolist())
+        
+        # estimate landmark position in world
+        all_zeros = not np.any(mu)
+        if mu is not all_zeros:
+            for j in observed_objects:
+                k = 0
+                x,y = vf.feature_pos_and_cov(X,mu,Sigma,k)
+                xfeatworld.append(x)
+                yfeatworld.append(y)
+                k = k + 1
 
         # Before ending loop, increment iteration 
         m = m + 1
@@ -451,6 +490,42 @@ green_patch = mpatches.Patch(color='green', label='odometry information')
 blue_patch = mpatches.Patch(color='blue', label='particles')
 plt.legend(handles=[red_patch, green_patch , blue_patch])
 
+# plot landmarks
+featwidth = 0.2
+featheight = 0.2
+#plt.plot(featpos[0,0],featpos[0,1],'m*',featpos[1,0],featpos[1,1],'m*',featpos[2,0],featpos[2,1],'m*',featpos[3,0],featpos[3,1],'m*',featpos[4,0],featpos[4,1],'m*',featpos[5,0],featpos[5,1],'m*',featpos[6,0],featpos[6,1],'m*',featpos[7,0],featpos[7,1],'m*',featpos[8,0],featpos[8,1],'m*')
+r1=mpatches.Rectangle(xy=(featpos[0,0]-featwidth/2,featpos[0,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r2=mpatches.Rectangle(xy=(featpos[1,0]-featwidth/2,featpos[1,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r3=mpatches.Rectangle(xy=(featpos[2,0]-featwidth/2,featpos[2,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r4=mpatches.Rectangle(xy=(featpos[3,0]-featwidth/2,featpos[3,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r5=mpatches.Rectangle(xy=(featpos[4,0]-featwidth/2,featpos[4,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r6=mpatches.Rectangle(xy=(featpos[5,0]-featwidth/2,featpos[5,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r7=mpatches.Rectangle(xy=(featpos[6,0]-featwidth/2,featpos[6,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r8=mpatches.Rectangle(xy=(featpos[7,0]-featwidth/2,featpos[7,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r9=mpatches.Rectangle(xy=(featpos[8,0]-featwidth/2,featpos[8,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+ax.add_patch(r1)
+ax.add_patch(r2)
+ax.add_patch(r3)
+ax.add_patch(r4)
+ax.add_patch(r5)
+ax.add_patch(r6)
+ax.add_patch(r7)
+ax.add_patch(r8)
+ax.add_patch(r9)
+
+def label(xy, text):
+    y = xy[1] - 0.3  # shift y-value for label so that it's below the artist
+    plt.text(xy[0], y, text, ha="center", family='sans-serif', size=10, color = 'gray')
+label((featpos[0,0],featpos[0,1]),'feat 1')
+label((featpos[1,0],featpos[1,1]),'feat 2')
+label((featpos[2,0],featpos[2,1]),'feat 3')
+label((featpos[3,0],featpos[3,1]),'feat 4')
+label((featpos[4,0],featpos[4,1]),'feat 5')
+label((featpos[5,0],featpos[5,1]),'feat 6')
+label((featpos[6,0],featpos[6,1]),'feat 7')
+label((featpos[7,0],featpos[7,1]),'feat 8')
+label((featpos[8,0],featpos[8,1]),'feat 9')
+
 # Add arrows to plot
 for elements in arrows:
     elements.set_visible(False) 
@@ -475,12 +550,16 @@ def update_animation(frame):
     ydata2 = yodom[frame]
     xdata3 = particles_xpos[frame]
     ydata3 = particles_ypos[frame]
-    xdata4 = xmu[frame]
-    ydata4 = ymu[frame]    
+    
+    if all(xmu_mean[:frame]):
+        xdata4 = xmu_mean[frame]
+        ydata4 = ymu_mean[frame]   
+        line4.set_data(xdata4, ydata4)
+        
     line.set_data(xdata, ydata)
     line2.set_data(xdata2, ydata2)   
     line3.set_data(xdata3, ydata3)
-    line4.set_data(xdata4, ydata4)
+    
     # Add arrows
     for elements in arrows:
         elements.set_visible(False)    
@@ -493,45 +572,11 @@ def update_animation(frame):
 anim = animation.FuncAnimation(fig, update_animation, interval=200, frames=ns, init_func=init_animation, blit=True)
 
 # to save the file as an animation, one needs ffmpeg. Anaconda: conda install -c conda-forge ffmpeg
-#Writer = animation.writers['ffmpeg']
-#writer = WRriter(fps=15, metadata=dict(artist='Me'), bitrate=1800)
-#anim.save('basic_animation.mp4', writer=writer)
+Writer = animation.writers['ffmpeg']
+writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+anim.save('basic_animation.mp4', writer=writer)
 
-# plot landmarks
-featwidth = 0.2
-featheight = 0.2
-plt.plot(featpos[0,0],featpos[0,1],'m*',featpos[1,0],featpos[1,1],'m*',featpos[2,0],featpos[2,1],'m*',featpos[3,0],featpos[3,1],'m*',featpos[4,0],featpos[4,1],'m*',featpos[5,0],featpos[5,1],'m*',featpos[6,0],featpos[6,1],'m*',featpos[7,0],featpos[7,1],'m*',featpos[8,0],featpos[8,1],'m*')
-r1=mpatches.Rectangle(xy=(featpos[0,0]-featwidth/2,featpos[0,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r2=mpatches.Rectangle(xy=(featpos[1,0]-featwidth/2,featpos[1,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r3=mpatches.Rectangle(xy=(featpos[2,0]-featwidth/2,featpos[2,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r4=mpatches.Rectangle(xy=(featpos[3,0]-featwidth/2,featpos[3,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r5=mpatches.Rectangle(xy=(featpos[4,0]-featwidth/2,featpos[4,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r6=mpatches.Rectangle(xy=(featpos[5,0]-featwidth/2,featpos[5,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r7=mpatches.Rectangle(xy=(featpos[6,0]-featwidth/2,featpos[6,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r8=mpatches.Rectangle(xy=(featpos[7,0]-featwidth/2,featpos[7,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-r9=mpatches.Rectangle(xy=(featpos[8,0]-featwidth/2,featpos[8,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=1, color='black')
-ax.add_patch(r1)
-ax.add_patch(r2)
-ax.add_patch(r3)
-ax.add_patch(r4)
-ax.add_patch(r5)
-ax.add_patch(r6)
-ax.add_patch(r7)
-ax.add_patch(r8)
-ax.add_patch(r9)
 
-def label(xy, text):
-    y = xy[1] - 0.3  # shift y-value for label so that it's below the artist
-    plt.text(xy[0], y, text, ha="center", family='sans-serif', size=10, color = 'gray')
-label((featpos[0,0],featpos[0,1]),'feat 1')
-label((featpos[1,0],featpos[1,1]),'feat 2')
-label((featpos[2,0],featpos[2,1]),'feat 3')
-label((featpos[3,0],featpos[3,1]),'feat 4')
-label((featpos[4,0],featpos[4,1]),'feat 5')
-label((featpos[5,0],featpos[5,1]),'feat 6')
-label((featpos[6,0],featpos[6,1]),'feat 7')
-label((featpos[7,0],featpos[7,1]),'feat 8')
-label((featpos[8,0],featpos[8,1]),'feat 9')
 
 # Arrow
 #a1 = mpatches.Arrow(x = -1, y=1, dx=1, dy=2, width=0.2)
