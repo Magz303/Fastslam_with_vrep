@@ -81,26 +81,32 @@ featpos = np.asarray(featposlist)
    
 # Intitiate required V_REP odometry information
 error_code, simtime1 = vrep.simxGetFloatSignal(clientID, 'vrep_simtime', vrep.simx_opmode_streaming) #some error_code here for some reason
-error_code, simtime1 = vrep.simxGetFloatSignal(clientID, 'vrep_simtime', vrep.simx_opmode_buffer)
 error_code, theta_L1 = vrep.simxGetJointPosition(clientID, h_motor_left, vrep.simx_opmode_streaming) # error_code
-error_code, theta_L1 = vrep.simxGetJointPosition(clientID, h_motor_left, vrep.simx_opmode_buffer) 
 error_code, theta_R1 = vrep.simxGetJointPosition(clientID, h_motor_right, vrep.simx_opmode_streaming) # error_code
+time.sleep(0.1) # try to wait for vrep in order to get correct values
 error_code, theta_R1 = vrep.simxGetJointPosition(clientID, h_motor_right, vrep.simx_opmode_buffer) 
+error_code, simtime1 = vrep.simxGetFloatSignal(clientID, 'vrep_simtime', vrep.simx_opmode_buffer)
+error_code, theta_L1 = vrep.simxGetJointPosition(clientID, h_motor_left, vrep.simx_opmode_buffer) 
 R_L = 0.1/2 # Radius of left wheel
 R_R = R_L  
 B = 0.2 # Length between front and back wheels
-CALIB_ODOM = 1/2.68 # odometry calibration using radius 0.5 and B = 0.2
+CALIB_ODOM = 1/2.685 # odometry calibration using radius 0.5 and B = 0.2
 
 # Initialize V-REP vision sensor information
-error_code, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, h_prox_sensor, vrep.simx_opmode_streaming)    
-error_code, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, h_prox_sensor, vrep.simx_opmode_buffer)    
+error_code, detection_state, detected_point, detected_object_handle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, h_prox_sensor, vrep.simx_opmode_streaming)    
 error_code, resolution, image = vrep.simxGetVisionSensorImage(clientID, h_car_cam, 0, vrep.simx_opmode_streaming)
+time.sleep(0.1) # try to wait for vrep in order to get correct values
+error_code, detection_state, detected_point, detected_object_handle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, h_prox_sensor, vrep.simx_opmode_buffer) 
 error_code, resolution, image = vrep.simxGetVisionSensorImage(clientID, h_car_cam, 0, vrep.simx_opmode_buffer)
 
-# Initialize V-REP car object position
-error_code, carpos = vrep.simxGetObjectPosition(clientID, h_car, -1,vrep.simx_opmode_streaming)
-error_code, carpos = vrep.simxGetObjectPosition(clientID, h_car, -1,vrep.simx_opmode_buffer)
-carpos = [carpos]
+# Initialize V-REP car object position and position
+error_code, carpos1 = vrep.simxGetObjectPosition(clientID, h_car, -1,vrep.simx_opmode_streaming)
+error_code, carangle1 = vrep.simxGetObjectOrientation(clientID, h_car, -1, vrep.simx_opmode_streaming)
+time.sleep(0.1) # try to wait for vrep in order to get correct values
+error_code, carpos1 = vrep.simxGetObjectPosition(clientID, h_car, -1,vrep.simx_opmode_buffer)
+error_code, carangle1 = vrep.simxGetObjectOrientation(clientID, h_car, -1, vrep.simx_opmode_buffer)
+carpos = [carpos1[:2]] # x, y position
+carangle = [np.mod(-carangle1[2],2*np.pi) - np.pi] # "car" is oriented 180 degrees related to "world"
 
 # Try to control robot to drive a rectangular path in separate thread
 try:
@@ -110,7 +116,7 @@ except:
    print("Error: unable to start thread")
 
 # Simulation time properties
-sampletime = 5e-1
+sampletime = 2.5e-1
 totalsimtime = 20
 starttime=time.time()
 time1 = starttime
@@ -118,17 +124,6 @@ timevector = [[starttime]]
 
 # Initialize number of samples during simulation for reference
 ns = int(totalsimtime/sampletime)
-
-# Intialize odometry needed information
-xodom = np.zeros((ns,1))
-yodom = np.zeros((ns,1))
-xodom[0] = 0
-yodom[0] = 0.5
-theta = np.zeros((ns,1))
-theta[0] = -np.pi #start position
-w = np.zeros((ns,1))
-v = np.zeros((ns,1))
-dtsim = np.zeros((ns,1))
 
 # Initialize sensing
 sensed_obj_true = np.zeros((ns,1))
@@ -139,8 +134,11 @@ sensed_obj_pos = np.zeros((ns,3))
 arrows = []
 
 # Initialize particles (landmark, particles, rows, cols)
-M = 30 # Number of particles
-Xstart = np.array([0, 0.5, -np.pi]) # Assumed particle start position
+M = 50    # Number of particles
+xstart = carpos[0][0]
+ystart = carpos[0][1]
+thetastart = carangle[0]
+Xstart = np.array([xstart, ystart, thetastart]) # Assumed particle start position
 X = np.repeat(Xstart[:, np.newaxis], M, axis=1) # Set of particles 
 particles_xpos = [X[0,:].tolist()]
 particles_ypos = [X[1,:].tolist()]
@@ -153,6 +151,17 @@ Sigma = np.zeros((1,M,2,2)) # feature position covariance related to each partic
 Sigma_init = np.zeros((1,M,2,2)) # feature position covariance related to each particle and feature
 Sigma_new = np.zeros((1,M,2,2))
 
+# Intialize odometry needed information
+xodom = np.zeros((ns,1))
+yodom = np.zeros((ns,1))
+xodom[0] = xstart
+yodom[0] = ystart
+theta = np.zeros((ns,1))
+theta[0] = thetastart #start position
+w = np.zeros((ns,1))
+v = np.zeros((ns,1))
+dtsim = np.zeros((ns,1))
+
 # Keep track of the mean values for plotting of landmarks
 xmu_mean = []
 ymu_mean = []
@@ -163,17 +172,25 @@ Sigma_mean = []
 xfeatworld = []
 yfeatworld = []
 
+# Debug
+debug = np.zeros((ns,3,M))
+debug2 = np.zeros((ns,3,M))
+debug3 = np.zeros((ns,3,M))
+debug_ns3M = np.zeros((ns,3,M))
+debug_ns512 = np.zeros((ns,5,1,2))
+debug_ns2M = np.zeros((ns,2,M))
+
 # Initialize process noise acovariance matricies
-stddev_R = 0.05
-#stddev_R = 0.01
+#stddev_R = 0.05
+stddev_R = 0.0001
 R = np.eye(3) * stddev_R**2
 
 # Initialize measurement noise acovariance matricies
-stddev_Qt = 0.1
-stddev_range = 1
-stddev_bearing = 1
-Qt = np.eye(2) * stddev_Qt
-Qt = np.array([[stddev_range, 0],[0, stddev_bearing]])
+#stddev_Qt = 0.00001
+stddev_range = 0.01
+stddev_bearing = 0.01
+#Qt = np.eye(2) * stddev_Qt**2
+Qt = np.array([[stddev_range**2, 0],[0, stddev_bearing**2]])
 QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0)
 QtSinv = np.linalg.inv(QtS)
 
@@ -231,27 +248,31 @@ while (time.time() - starttime < totalsimtime):
             sensed_obj_pos[m,2] = detected_point[2] #y
             sensed_obj_pos[m,0] = detected_point[0] #z
         
-        # Save exact car location for reference
-        error_code, carpos2 = vrep.simxGetObjectPosition(clientID, h_car, -1, vrep.simx_opmode_buffer)
-        carpos.append(carpos2)
+        # Save exact car location and orientation for reference
+        error_code, carpos1 = vrep.simxGetObjectPosition(clientID, h_car, -1, vrep.simx_opmode_buffer)
+        carpos.append(carpos1[:2])
+        error_code, carangle1 = vrep.simxGetObjectOrientation(clientID, h_car, -1, vrep.simx_opmode_buffer)
+        carangle.append([np.mod(-carangle1[2],2*np.pi) - np.pi])
         
         # Save odometry position estimate for next car position without diffusion for reference
         xodom[m+1], yodom[m+1], theta[m+1] = vf.predict_motion_xytheta(xodom[m], yodom[m], theta[m], v[m], w[m], dtsim[m])
         
         # Start fastslam
-        
-        # proposal distribution for particles based on odometry and previous poses
-        # Sbar = vf.predict_motion(S, v[m], w[m], R, dtsim[m])
-        
+               
         # Sample pose
         Xbar = vf.sample_pose(X, v[m], w[m], R, dtsim[m]) # 3XM ([x,y,theta]'XM)
         
+        # Debug getting exact position
+        Xbar2 = np.array([carpos1[0], carpos1[1], np.mod(-carangle1[2],2*np.pi) - np.pi]).reshape(3,1)*np.ones((1,M))
+        debug[m] = Xbar
+        debug2[m] = Xbar2
+        debug3[m] = Xbar2-Xbar
         # if feature observed
         if (detection_state):
             
             # if feature never seen before
             if (detected_object_handle not in observed_objects):
-                
+
                 # Report which feature index was detected
                 feature_index = vf.id_feature(features,detected_object_handle)
                 print('Detected feature: ', feature_index, '(new)') 
@@ -259,28 +280,40 @@ while (time.time() - starttime < totalsimtime):
                 # Create an arrow object
                 arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))
                 
+                
                 # Add feature to feature list
                 observed_objects.append(detected_object_handle)
                 
                 # Save the index of the feature
-                j = observed_objects.index(detected_object_handle) # get index of the already observed object
-             
+                k = observed_objects.index(detected_object_handle) # get index of the already observed object
+                
                 # Calculate range and angle to feature related to each particle in the particle set
                 # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
                 observed_objects_pos = np.asarray(detected_pointxy[0:2]).reshape(2,1) #2X1
+
                 z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM
-                
+#                featpos[feature_index-1]
+#                carpos1
+#                Xbar[:,1]
+#                detected_pointxy
+
+#                if k ==2:
+#                    while(True):
+#                        error_code2 = vrep.simxSetJointTargetVelocity(clientID,h_motor_left,0,vrep.simx_opmode_streaming)       
+#                        error_code2 = vrep.simxSetJointTargetVelocity(clientID,h_motor_right,0,vrep.simx_opmode_streaming)
+#                        print(k)
+                        
                 # Initialize mean x,y position of feature based on range and angle in z
                 mu_init[0,:,:] = vf.init_mean_from_z(Xbar, z) # 1X2XM
-                
+
                 # Add to list of mean position x,y of features
-                if j == 0:
-                    mu = mu_init # 2XMX1
+                if k == 0:
+                    mu = np.copy(mu_init) # 1X2XM
                 else:
                     mu = np.concatenate((mu,mu_init),axis=0) # NX2XM
-                
+                                   
                 # calculatione observation model jacobian 
-                H = vf.calculate_measurement_jacobian(Xbar,mu,j) # # MX2X2. Only for this feature 
+                H = vf.calculate_measurement_jacobian(Xbar,mu,k) # # MX2X2. Only for this feature 
                 
                 # Make a transpose along the 2x2 dimension for each particle
                 H_T = np.transpose(H,(1,0,2)) # MX2X2
@@ -306,17 +339,20 @@ while (time.time() - starttime < totalsimtime):
                 
                 
                 # Add to list of sigma covariance of features
-                if j == 0:
-                    Sigma = Sigma_init #MX2X2
+                if k == 0:
+                    Sigma = np.copy(Sigma_init) #MX2X2
                 else:
                     Sigma = np.concatenate((Sigma,Sigma_init),axis=0) # NXMX3X3              
                 
                 # default importance weights, should be equal to one
                 weights = 1/M*np.ones((1,M)) # 1XM
+                
+                # Make the covariance matrix symmetrical
+                Sigma[k,:,:,:] = (Sigma[k,:,:,:] + np.transpose(Sigma[k,:,:,:],(0,2,1)))/2
             
-            # else if feature has been seen before
+#            # else if feature has been seen before
             else:
-                j = observed_objects.index(detected_object_handle)
+                k = observed_objects.index(detected_object_handle)
                 
                 # Calculate range and angle to feature related to each particle in the particle set
                 # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
@@ -331,38 +367,43 @@ while (time.time() - starttime < totalsimtime):
                 arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))
                 
                 # measurement prediction based on particle set X and mean feature position mu
-                zhat = vf.observation_model_zhat(Xbar,mu,j,Qt) # 2XM
+                zhat = vf.observation_model_zhat(Xbar,mu,k,Qt) # 2XM
                 
                 # calculate jacobian
-                H = vf.calculate_measurement_jacobian(X,mu,j) # MX2X2
+                H = vf.calculate_measurement_jacobian(Xbar,mu,k) # MX2X2
                 
                 # Make a transpose along the 3x3 dimension for each particle
                 H_T = np.transpose(H,(0,2,1)) # MX2X2     
                 
                 # Measurement covariance (not the same as Qt measurement covariance noise)
-                Q = H @ Sigma[j,:,:,:] @ H_T + QtS # MX2X2
+                Q = H @ Sigma[k,:,:,:] @ H_T + QtS # MX2X2
                 
                 # Inverse of measurement covariance
                 Qinv = np.linalg.inv(Q) # MX2X2
                 
                 # Calculate Kalman gain
-                K = Sigma[j,:,:,:] @ H_T @ Qinv # MX3X2
+                K = Sigma[k,:,:,:] @ H_T @ Qinv # MX3X2
                 
                 # innovation 2XM
                 nu = (z-zhat) # 2XM
                 
                 # correct angle innovation to be within -pi and pi
                 nu[1,:] = ((nu[1,:] + np.pi) % (2*np.pi)) - np.pi
-               
+                debug_ns2M[m] = nu
+                
                 # Add extra row to measurement error for Kalman gain multiplication
                 #zerror = np.concatenate((z,np.zeros((1,M))),axis=0) # 3XM, but I want it MX3X1
                 nu = np.transpose(nu.reshape(2,M,1),(1,0,2)) # MX2X1
+
                 
                 # update mean. Is this really correct??? mixing coordinates? features x,y. nu is in r,theta. Kalman gain ???.
-                mu[j,:,:] = mu[j,:,:] + (K @ nu).T # NX2XM # think about changing to NXMX2X1
+                mu[k,:,:] = mu[k,:,:] + (K @ nu).T # NX2XM # think about changing to NXMX2X1
                 
                 # update covariance
-                Sigma[j,:,:,:] = (I - K@H) @ Sigma[j,:,:,:]# NXMX2X2
+                Sigma[k,:,:,:] = (I - K@H) @ Sigma[k,:,:,:]# NXMX2X2
+                
+                # Make the covariance matrix symmetrical
+                Sigma[k,:,:,:] = (Sigma[k,:,:,:] + np.transpose(Sigma[k,:,:,:],(0,2,1)))/2
                 
                 # importance factor amplitude.
                 ata = 1/np.sqrt(np.pi*2*np.linalg.det(Q)) # 1XM
@@ -385,13 +426,16 @@ while (time.time() - starttime < totalsimtime):
         # if no feature was detected or for the features that were not detected 
         else:  
             # mean and covariance the same as earlier time step
-            mu = mu
-            Sigma = Sigma
+#            mu = mu
+#            Sigma = Sigma
             
             # Create a dummy arrow
             arrows.append(vf.add_arrow_object(m,np.zeros((ns,3)),np.zeros((10,3)),0))
                        
         # Resampling  
+        
+        # Debug
+#        X = np.copy(Xbar)
         
         # Re-initialize the particles
         X = np.zeros((3,M))
@@ -426,24 +470,14 @@ while (time.time() - starttime < totalsimtime):
         xmu_mean.append(mu_mean[:,0].tolist())
         ymu_mean.append(mu_mean[:,1].tolist())
         
-        # take the average of the robot position
-        X_mean = np.mean(X,axis=1)
-        xpos_mean.append(X_mean[0].tolist())
-        ypos_mean.append(X_mean[1].tolist())
-        theta_mean.append(X_mean[2].tolist())
-        
-        Sigma_mean_iter = np.mean(Sigma,axis=1)
-        Sigma_mean.append(Sigma_mean_iter.tolist())
-        
-        # estimate landmark position in world
-        all_zeros = not np.any(mu)
-        if mu is not all_zeros:
-            for j in observed_objects:
-                k = 0
-                x,y = vf.feature_pos_and_cov(X,mu,Sigma,k)
-                xfeatworld.append(x)
-                yfeatworld.append(y)
-                k = k + 1
+#        # take the average of the robot position
+#        X_mean = np.mean(X,axis=1)
+#        xpos_mean.append(X_mean[0].tolist())
+#        ypos_mean.append(X_mean[1].tolist())
+#        theta_mean.append(X_mean[2].tolist())
+#        
+#        Sigma_mean_iter = np.mean(Sigma,axis=1)
+#        Sigma_mean.append(Sigma_mean_iter.tolist())
 
         # Before ending loop, increment iteration 
         m = m + 1
@@ -551,11 +585,14 @@ def update_animation(frame):
     xdata3 = particles_xpos[frame]
     ydata3 = particles_ypos[frame]
     
-    if all(xmu_mean[:frame]):
-        xdata4 = xmu_mean[frame]
-        ydata4 = ymu_mean[frame]   
-        line4.set_data(xdata4, ydata4)
-        
+    try:    
+        if all(xmu_mean[:frame]):
+            xdata4 = xmu_mean[frame]
+            ydata4 = ymu_mean[frame]   
+            line4.set_data(xdata4, ydata4)
+    except:
+        pass
+    
     line.set_data(xdata, ydata)
     line2.set_data(xdata2, ydata2)   
     line3.set_data(xdata3, ydata3)
