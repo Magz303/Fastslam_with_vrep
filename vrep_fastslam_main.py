@@ -42,10 +42,6 @@ import time # used for simulation time steps
 import matplotlib.animation as animation # for animated plotting
 import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
 
-# used to flatten a 2d-list in the animation plot
-from functools import reduce 
-import operator 
-
 # This file uses the vrep API library. Check that connection to Vrep can be established
 try:
     import vrep
@@ -70,29 +66,28 @@ Here the user can define the particles, model noise parameters and simulation ti
 """
 
 # Simulation time properties
-totalsimtime = 10 # Time to capture data and run simulation
+totalsimtime = 20 # Time to capture data and run simulation
 sampletime = 2.5e-1 # Sample time of the simulation
 
 # Initialize particles, number and starting position
-M = 50    # Number of particles
+M = 50    # Enter number of particles
 xstart = carpos[0][0]
 ystart = carpos[0][1]
 thetastart = carangle[0]
 
 # Initialize process noise covariance matricies
-#stddev_R = 0.01 working
-#R = np.eye(3) * stddev_R**2
-stddev_x = 0.01
-stddev_y = 0.01
-stddev_theta = 0.001
+stddev_x = 0.01 # Enter standard deviation
+stddev_y = 0.01 # Enter standard deviation
+stddev_theta = 0.001 # Enter standard deviation
+
 R = np.eye(3)
 R[0,0] = stddev_x**2
 R[1,1] = stddev_y**2
 R[2,2] = stddev_theta**2
 
 # Initialize measurement noise covariance matricies
-stddev_range = 0.1
-stddev_bearing = 0.1
+stddev_range = 0.1 # Enter standard deviation
+stddev_bearing = 0.1 # Enter standard deviation
 
 Qt = np.eye(2)
 Qt[0,0] = stddev_range**2
@@ -100,10 +95,6 @@ Qt[1,1] = stddev_bearing**2
 
 QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0) # Scaled variant
 QtSinv = np.linalg.inv(QtS)
-
-#stddev_range = 0.1
-#stddev_bearing = 0.1
-#Qt = np.array([[stddev_range**2, 0],[0, stddev_bearing**2]])
 
 """
 Setup interface towards Vrep
@@ -250,14 +241,6 @@ observed_objects = []
 # Initialize identify matrix
 I = np.repeat(np.eye(2)[np.newaxis, :, : ], M, axis=0)
 
-# Debug vectors
-#debug = np.zeros((ns,3,M))
-#debug2 = np.zeros((ns,3,M))
-#debug3 = np.zeros((ns,3,M))
-#debug_ns3M = np.zeros((ns,3,M))
-#debug_ns512 = np.zeros((ns,5,1,2))
-#debug_ns2M = np.zeros((ns,2,M))
-
 # Initialize counter
 m = 0 # counter for main loop
 
@@ -324,12 +307,9 @@ while (time.time() - starttime < totalsimtime):
         # Sample pose / predict next position
         Xbar = vf.sample_pose(X, v[m], w[m], R, dtsim[m]) # 3XM ([x,y,theta]'XM)
         
-        # Debug robot position
-#        Xbar2 = np.array([carpos1[0], carpos1[1], np.mod(-carangle1[2],2*np.pi) - np.pi]).reshape(3,1)*np.ones((1,M))
-#        debug[m] = Xbar
-#        debug2[m] = Xbar2
-#        debug3[m] = Xbar2-Xbar
-        
+        # Debug robot position purposes
+        # Xbar2 = np.array([carpos1[0], carpos1[1], np.mod(-carangle1[2],2*np.pi) - np.pi]).reshape(3,1)*np.ones((1,M))
+
         # if feature observed
         if (detection_state):
             
@@ -355,11 +335,11 @@ while (time.time() - starttime < totalsimtime):
                 # Get range and angle from x,y detected feature in relation to robot reference frame 
                 z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM
 
-#               # Debug info               
-#                featpos[feature_index-1]
-#                carpos1
-#                Xbar[:,1]
-#                detected_pointxy
+                # Debug info purposes              
+                # featpos[feature_index-1]
+                # carpos1
+                # Xbar[:,1]
+                # detected_pointxy
                         
                 # Initialize mean x,y position of feature in relation to world reference frame
                 # based on range and angle of detected feature in robot reference frame and estimated robot position 
@@ -510,13 +490,13 @@ while (time.time() - starttime < totalsimtime):
         # Add covariance ellipse object
         ellipses.append(vf.add_ellipse_object(Sigma, mu))
         
-        # Save the average particle position into list for plot purposes
+        # Save the average particle position into list for plot purposes (not used)
         X_mean = np.mean(X,axis=1)
         xpos_mean.append(X_mean[0].tolist())
         ypos_mean.append(X_mean[1].tolist())
         theta_mean.append(X_mean[2].tolist())
 
-        # Save the average covariance matrix into list for plot purposes        
+        # Save the average covariance matrix into list for plot purposes (not used)      
         Sigma_mean_iter = np.mean(Sigma,axis=1)
         Sigma_mean.append(Sigma_mean_iter.tolist())
 
@@ -560,14 +540,7 @@ red_patch = mpatches.Patch(color='red', label='exact car position')
 green_patch = mpatches.Patch(color='green', label='odometry information')
 blue_patch = mpatches.Patch(color='blue', label='particles')
 plt.legend(handles=[red_patch, green_patch , blue_patch])
-#b : blue.
-#g : green.
-#r : red.
-#c : cyan.
-#m : magenta.
-#y : yellow.
-#k : black.
-#w : white.
+#b : blue. #g : green.#r : red.#c : cyan.#m : magenta.#y : yellow.#k : black. #w : white.
 
 ## plot features as rectangles
 featwidth = 0.2
@@ -595,6 +568,7 @@ ax.add_patch(r9)
 def label(xy, text):
     y = xy[1] - 0.3  # shift y-value for label so that it's below the artist
     plt.text(xy[0], y, text, ha="center", family='sans-serif', size=10, color = 'gray')
+    
 label((featpos[0,0],featpos[0,1]),'feat 1')
 label((featpos[1,0],featpos[1,1]),'feat 2')
 label((featpos[2,0],featpos[2,1]),'feat 3')
@@ -605,7 +579,7 @@ label((featpos[6,0],featpos[6,1]),'feat 7')
 label((featpos[7,0],featpos[7,1]),'feat 8')
 label((featpos[8,0],featpos[8,1]),'feat 9')
 
-# Time vector
+# Time vector (not used)
 t = np.asarray(timevector)
 t = t - t[0]
 
@@ -706,7 +680,7 @@ anim.save('basic_animation.mp4', writer=writer)
 plt.show()
 
 """
-OLD STUFF, camera image etc
+Not used
 """
           
 # Get camera image and plot it
@@ -717,7 +691,7 @@ OLD STUFF, camera image etc
 #im.shape
 #plt.imshow(im, origin='lower')        
         
-## Test with multiple objects sensed  - send string signal with floats
+## Test with multiple objects sensed  - send string signal with floats - not working
 #error_code, signalValue = vrep.simxGetStringSignal(clientID,"myStringSignalName",vrep.simx_opmode_streaming)
 #error_code, signalValue = vrep.simxGetStringSignal(clientID,"myStringSignalName",vrep.simx_opmode_buffer)
 #vrep.simxUnpackFloats(signalValue)

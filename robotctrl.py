@@ -3,7 +3,13 @@
 """
 Created on Thu Dec 28 17:35:29 2017
 
-@author: magnustarle
+@author: Magnus Tarle
+
+Description:
+    This file contains the robot control which makes the robot in Vrep move by
+    setting the angular velocity of the front wheels
+    The thread class is based on an internet source which I couldn't 
+    find the reference to
 """
 
 import vrep
@@ -26,6 +32,7 @@ class ctrlRobot (threading.Thread):
       print("Exiting " + self.name)
    
 def run_path(clientID, h_motor_left, h_motor_right):
+    # Main path for robot
     vel0 = 3
     for m in range(0, 8):
         # run straight
@@ -43,6 +50,7 @@ def run_path(clientID, h_motor_left, h_motor_right):
         m = m + 1
         
 def run_path2(clientID, h_motor_left, h_motor_right):
+    # Alternative path for robot
     vel0 = 3
     # run straight
     vel_left = vel0
@@ -56,9 +64,3 @@ def run_path2(clientID, h_motor_left, h_motor_right):
     error_code2 = vrep.simxSetJointTargetVelocity(clientID,h_motor_left,vel_left,vrep.simx_opmode_streaming)       
     error_code2 = vrep.simxSetJointTargetVelocity(clientID,h_motor_right,vel_right,vrep.simx_opmode_streaming)
     time.sleep(1.65)        
-#
-## stop robot    
-#vel_left = 1
-#vel_right = -1
-#error_code = vrep.simxSetJointTargetVelocity(clientID,h_motor_left,vel_left,vrep.simx_opmode_streaming)       
-#error_code = vrep.simxSetJointTargetVelocity(clientID,h_motor_right,vel_right,vrep.simx_opmode_streaming)
