@@ -1,4 +1,27 @@
 # Fastslam_with_vrep
-Course project in which I need to use python and V-rep together with fastslam 1.0 with known correspondence.
-V-rep file not included at the moment and python code under development.
-planned finished date 19 January.
+Description:
+    Course project which uses the Fastslam 1.0 algorithm with known 
+    correspondences together with a robot car model in the 
+    robot simulation software V-rep. 
+
+Requirements: 
+    *Vrep software, specific Vrep model file, vrep api library
+    *vrep_fastslam_functions.py for related functions used throughout the code
+    *robotctrl.py to control the robot path
+    
+Usage:
+    Start the simulation in Vrep and execute the code. It will run for
+    a given simulation time. The user has to decide on amount on particles
+    and noise and process covariance matrix.
+
+Note1: 
+    The plotting assumes that a separate plot window will be used and 
+    not an inline plot
+
+Note2: 
+    The code is procedural and not object oriented. It follows the 
+    algoritm in "Probabilistic Robotics" by Sebastian Thrun et.al.. I made an
+    attempt to avoid iteration across the particles to save speed.
+
+Note3: 
+    The code needs refactoring to be more clear
