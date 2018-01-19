@@ -10,22 +10,57 @@ Containts functions and simplified test functions for vrep_fastslam
 """
 import numpy as np
 import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
+from scipy.stats import norm, chi2 # used for the covariance
 
-def feature_pos_and_cov(X,mu,Sigma,k):
+def cov_ellipse(cov, q=None, nsig=None, **kwargs):
+    """
+    source: https://stackoverflow.com/questions/12301071/multidimensional-confidence-intervals
+    answered Sep 28 '16 at 13:40 by Syrtis Major
+
+    Parameters
+    ----------
+    cov : (2, 2) array
+        Covariance matrix.
+    q : float, optional
+        Confidence level, should be in (0, 1)
+    nsig : int, optional
+        Confidence level in unit of standard deviations. 
+        E.g. 1 stands for 68.3% and 2 stands for 95.4%.
+
+    Returns
+    -------
+    width, height, rotation :
+         The lengths of two axises and the rotation angle in degree
+    for the ellipse.
+    """
+
+    if q is not None:
+        q = np.asarray(q)
+    elif nsig is not None:
+        q = 2 * norm.cdf(nsig) - 1
+    else:
+        raise ValueError('One of `q` and `nsig` should be specified.')
+    r2 = chi2.ppf(q, 2)
+
+    val, vec = np.linalg.eigh(cov)
+    width, height = 2 * np.sqrt(val[:, None] * r2)
+    rotation = np.degrees(np.arctan2(*vec[::-1, 0]))
+
+    return width, height, rotation
+
+
+def add_ellipse_object(Sigma, mu):
     mu_mean = np.mean(mu,axis=2)
-    X_mean = np.mean(X,axis=1)
     Sigma_mean = np.mean(Sigma,axis=1)
-
-    r = np.sqrt((mu_mean[k,0] - X_mean[0])**2 +(mu_mean[k,1] - X_mean[1])**2) # range to feature for each particle
-#    theta = np.arctan2(mu_mean[k,1]-X_mean[1] , mu_mean[k,0]-X_mean[0]) - X_mean[2] # angle to observed feature for each particle
-    theta = np.arctan2(mu_mean[k,0]-X_mean[0] , mu_mean[k,1]-X_mean[1])
-    theta_lim = ((theta + np.pi) % (2*np.pi)) - np.pi # limit angle between pi and -pi    
-    
-#    xfeat_world = X_mean[0] + r * np.cos(X_mean[2]+theta) # X position of particle plus x-distance to feature related to the particle
-#    yfeat_world = X_mean[1] + r * np.sin(X_mean[2]+theta) # the same for Y
-    xfeat_world = X_mean[0] + r * np.sin(theta + X_mean[2]) # X position of particle plus x-distance to feature related to the particle
-    yfeat_world = X_mean[1] + r * np.cos(theta + X_mean[2])
-    return xfeat_world, yfeat_world
+    ecov = []
+    n_features = len(np.mean(Sigma,axis=1))
+    for n in range(0,n_features): 
+        feat_cov_matrix = Sigma_mean[n]
+        featwidth, featheight, featrotdeg = cov_ellipse(feat_cov_matrix, q=0.99)
+        featx = mu_mean[n][0]
+        featy = mu_mean[n][1]        
+        ecov.append(mpatches.Ellipse(xy=(featx, featy), width=featwidth, height=featheight, angle=featrotdeg, fill=0))    
+    return ecov
 
 # USED IN SIM!
 def add_arrow_object(iter,carpos,featpos,feature_index):
@@ -213,7 +248,7 @@ def test_observation_model_zhat():
     print('car pos x:', X1[0], 'pos y:', X1[1], 'theta', X1[2])
     print('mean x:', m[k,0], 'y:', m[k,1])    
     print('calc range:', zhat[0], 'theta:', zhat[1] ,', deg:', thetadeg)      
-test_observation_model_zhat()
+#test_observation_model_zhat()
 
 def z_from_detectection(X,observed_objects_pos): # maybe remove Q and j here....
     # This function implements the observation model and calculates the range and angle z for 

@@ -4,7 +4,33 @@
 
 Created on Thu Dec 28 11:35:05 2017
 
-@author: magnus tarle
+@author: Magnus Tarle
+
+Description:
+    Course project which uses the Fastslam 1.0 algorithm with known 
+    correspondences together with the robot simulation software V-rep. 
+
+Requirements: 
+    *Vrep software, specific Vrep model file, vrep api library
+    *vrep_fastslam_functions.py for related functions used throughout the code
+    *robotctrl.py to control the robot path
+    
+Usage:
+    Start the simulation in Vrep and execute the code. It will run for
+    a given simulation time. The user has to decide on amount on particles
+    and noise and process covariance matrix.
+
+Note1: 
+    The plotting assumes that a separate plot window will be used and 
+    not an inline plot
+
+Note2: 
+    The code is procedural and not object oriented. It follows the 
+    algoritm in "Probabilistic Robotics" by Sebastian Thrun et.al.. I made an
+    attempt to avoid iteration across the particles to save speed.
+
+Note3: 
+    The code needs refactoring to be more clear
 """
 
 # Start Vrep simulation and run this program.
@@ -15,7 +41,10 @@ import matplotlib.pyplot as plt # used for plotting the robot position and map
 import time # used for simulation time steps
 import matplotlib.animation as animation # for animated plotting
 import matplotlib.patches as mpatches # used for legend, ellipses and rectangles
-#import itertools # for reducing a 2d list to 1d list
+
+# used to flatten a 2d-list in the animation plot
+from functools import reduce 
+import operator 
 
 # This file uses the vrep API library. Check that connection to Vrep can be established
 try:
@@ -35,19 +64,56 @@ import robotctrl
 # vrep fastslam defined functions in separate module 
 import vrep_fastslam_functions as vf
 
+
+"""
+Here the user can define the particles, model noise parameters and simulation time
+"""
+
+# Simulation time properties
+totalsimtime = 10 # Time to capture data and run simulation
+sampletime = 2.5e-1 # Sample time of the simulation
+
+# Initialize particles, number and starting position
+M = 50    # Number of particles
+xstart = carpos[0][0]
+ystart = carpos[0][1]
+thetastart = carangle[0]
+
+# Initialize process noise covariance matricies
+#stddev_R = 0.01 working
+#R = np.eye(3) * stddev_R**2
+stddev_x = 0.01
+stddev_y = 0.01
+stddev_theta = 0.001
+R = np.eye(3)
+R[0,0] = stddev_x**2
+R[1,1] = stddev_y**2
+R[2,2] = stddev_theta**2
+
+# Initialize measurement noise covariance matricies
+stddev_range = 0.1
+stddev_bearing = 0.1
+
+Qt = np.eye(2)
+Qt[0,0] = stddev_range**2
+Qt[1,1] = stddev_bearing**2
+
+QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0) # Scaled variant
+QtSinv = np.linalg.inv(QtS)
+
+#stddev_range = 0.1
+#stddev_bearing = 0.1
+#Qt = np.array([[stddev_range**2, 0],[0, stddev_bearing**2]])
+
+"""
+Setup interface towards Vrep
+"""
+
 # Connect to remote API server (vrep)
 vrep.simxFinish(-1) # just in case, close all opened connections
 clientID=vrep.simxStart('127.0.0.1', 19999, True, True, 5000, 5) # Connect to V-REP (remember to add this port to V-REP script)
 if clientID!=-1:
     print ('Connected to remote API server')
-
-
-# close all windows 
-plt.close("all")
-# Stop-Start simulation of robot
-#error_code=vrep.simxStopSimulation(clientID,vrep.simx_opmode_oneshot)
-#time.sleep(1) # wait for sim to stop
-#error_code = vrep.simxStartSimulation(clientID,vrep.simx_opmode_oneshot)
 
 # Get Vrep scene object handles for input and output of information
 error_code, h_motor_left = vrep.simxGetObjectHandle(clientID, 'motor_front_left', vrep.simx_opmode_oneshot_wait)
@@ -55,7 +121,8 @@ error_code, h_motor_right = vrep.simxGetObjectHandle(clientID, 'motor_front_righ
 error_code, h_prox_sensor = vrep.simxGetObjectHandle(clientID, 'proximity_sensor', vrep.simx_opmode_oneshot_wait)
 error_code, h_car_cam = vrep.simxGetObjectHandle(clientID, 'car_cam', vrep.simx_opmode_oneshot_wait)
 error_code, h_car = vrep.simxGetObjectHandle(clientID, 'car', vrep.simx_opmode_oneshot_wait)
-# CONSIDER: using for loop for handles and feature array
+# Get feature handles. at the moment, one has to manually add the features! 
+# TODO: make a loop and check consistency throughout the code
 error_code, h_feature1 = vrep.simxGetObjectHandle(clientID, 'feature1', vrep.simx_opmode_oneshot_wait)
 error_code, h_feature2 = vrep.simxGetObjectHandle(clientID, 'feature2', vrep.simx_opmode_oneshot_wait)
 error_code, h_feature3 = vrep.simxGetObjectHandle(clientID, 'feature3', vrep.simx_opmode_oneshot_wait)
@@ -105,6 +172,8 @@ error_code, carangle1 = vrep.simxGetObjectOrientation(clientID, h_car, -1, vrep.
 time.sleep(0.1) # try to wait for vrep in order to get correct values
 error_code, carpos1 = vrep.simxGetObjectPosition(clientID, h_car, -1,vrep.simx_opmode_buffer)
 error_code, carangle1 = vrep.simxGetObjectOrientation(clientID, h_car, -1, vrep.simx_opmode_buffer)
+
+# Save the car position and orientation in a list for reference and also use as start pose
 carpos = [carpos1[:2]] # x, y position
 carangle = [np.mod(-carangle1[2],2*np.pi) - np.pi] # "car" is oriented 180 degrees related to "world"
 
@@ -115,9 +184,15 @@ try:
 except:
    print("Error: unable to start thread")
 
-# Simulation time properties
-sampletime = 2.5e-1
-totalsimtime = 20
+
+"""
+Pre-simulation initialization
+"""
+
+# close all open plot windows 
+plt.close("all")
+
+# time initialization
 starttime=time.time()
 time1 = starttime
 timevector = [[starttime]]
@@ -125,19 +200,7 @@ timevector = [[starttime]]
 # Initialize number of samples during simulation for reference
 ns = int(totalsimtime/sampletime)
 
-# Initialize sensing
-sensed_obj_true = np.zeros((ns,1))
-sensed_obj_handle = np.zeros((ns,1))
-sensed_obj_pos = np.zeros((ns,3))
-
-# Create arrow object list for plotting detected objects
-arrows = []
-
-# Initialize particles (landmark, particles, rows, cols)
-M = 50    # Number of particles
-xstart = carpos[0][0]
-ystart = carpos[0][1]
-thetastart = carangle[0]
+# Setup vectors for particles, features etc
 Xstart = np.array([xstart, ystart, thetastart]) # Assumed particle start position
 X = np.repeat(Xstart[:, np.newaxis], M, axis=1) # Set of particles 
 particles_xpos = [X[0,:].tolist()]
@@ -162,43 +225,38 @@ w = np.zeros((ns,1))
 v = np.zeros((ns,1))
 dtsim = np.zeros((ns,1))
 
+# Initialize sensing
+sensed_obj_true = np.zeros((ns,1))
+sensed_obj_handle = np.zeros((ns,1))
+sensed_obj_pos = np.zeros((ns,3))
+
 # Keep track of the mean values for plotting of landmarks
-xmu_mean = []
+xmu_mean = [] # mean position of landmarks
 ymu_mean = []
-xpos_mean = []
+xpos_mean = [] # mean position of particles
 ypos_mean = []
 theta_mean = []
-Sigma_mean = []
-xfeatworld = []
-yfeatworld = []
+Sigma_mean = [] # mean covariance matrices
 
-# Debug
-debug = np.zeros((ns,3,M))
-debug2 = np.zeros((ns,3,M))
-debug3 = np.zeros((ns,3,M))
-debug_ns3M = np.zeros((ns,3,M))
-debug_ns512 = np.zeros((ns,5,1,2))
-debug_ns2M = np.zeros((ns,2,M))
+# Create arrow object list for plotting detected objects
+arrows = []
 
-# Initialize process noise acovariance matricies
-#stddev_R = 0.05
-stddev_R = 0.0001
-R = np.eye(3) * stddev_R**2
+# Create ellipse object for plotting covariance ellipses
+ellipses = []
 
-# Initialize measurement noise acovariance matricies
-#stddev_Qt = 0.00001
-stddev_range = 0.01
-stddev_bearing = 0.01
-#Qt = np.eye(2) * stddev_Qt**2
-Qt = np.array([[stddev_range**2, 0],[0, stddev_bearing**2]])
-QtS = np.repeat(Qt[np.newaxis, :, :], M, axis=0)
-QtSinv = np.linalg.inv(QtS)
-
-# Initialize number of observed objects
+# Initialize list to keep track of number of observed objects
 observed_objects = []
 
 # Initialize identify matrix
 I = np.repeat(np.eye(2)[np.newaxis, :, : ], M, axis=0)
+
+# Debug vectors
+#debug = np.zeros((ns,3,M))
+#debug2 = np.zeros((ns,3,M))
+#debug3 = np.zeros((ns,3,M))
+#debug_ns3M = np.zeros((ns,3,M))
+#debug_ns512 = np.zeros((ns,5,1,2))
+#debug_ns2M = np.zeros((ns,2,M))
 
 # Initialize counter
 m = 0 # counter for main loop
@@ -206,6 +264,10 @@ m = 0 # counter for main loop
 print('...')
 print('... total running time: ', totalsimtime, 's')
 print('starting fastslam...')
+
+"""
+Main simulation loop starts
+"""
 
 # Main loop
 while (time.time() - starttime < totalsimtime): 
@@ -226,8 +288,7 @@ while (time.time() - starttime < totalsimtime):
         timevector.append([time.time()])
         print('---------------------------------------')
         print('iter', m,'. time:',time.time()-starttime)
-        
-        
+               
         # Odometry calculation, get speed and angular frequency
         error_code, theta_L2 = vrep.simxGetJointPosition(clientID, h_motor_left, vrep.simx_opmode_buffer)
         error_code, theta_R2 = vrep.simxGetJointPosition(clientID, h_motor_right, vrep.simx_opmode_buffer)     
@@ -238,35 +299,37 @@ while (time.time() - starttime < totalsimtime):
                        
         # Extract sensor information for this time step
         error_code, detection_state, detected_point, detected_object_handle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, h_prox_sensor, vrep.simx_opmode_buffer)    
-#        detected_point[0] = detected_point[0] # reference frame of robot is -x, -y in relation to robot...
-#        detected_point[1] = detected_point[1]
-        detected_pointxy = [detected_point[1], detected_point[2]]
+        detected_pointxy = [detected_point[1], detected_point[2]] # sensor has its own reference frame
         sensed_obj_true[m] = detection_state
         if (sensed_obj_true[m]):
             sensed_obj_handle[m] = detected_object_handle
-            sensed_obj_pos[m,1] = detected_point[1] #x
-            sensed_obj_pos[m,2] = detected_point[2] #y
-            sensed_obj_pos[m,0] = detected_point[0] #z
+            # save information as reference
+            sensed_obj_pos[m,1] = detected_point[1] # x in robot reference frame
+            sensed_obj_pos[m,2] = detected_point[2] # y in robot reference frame
+            sensed_obj_pos[m,0] = detected_point[0] # z in robot reference frame
         
-        # Save exact car location and orientation for reference
+        # Save exact car location and orientation for reference inside a list
         error_code, carpos1 = vrep.simxGetObjectPosition(clientID, h_car, -1, vrep.simx_opmode_buffer)
         carpos.append(carpos1[:2])
         error_code, carangle1 = vrep.simxGetObjectOrientation(clientID, h_car, -1, vrep.simx_opmode_buffer)
-        carangle.append([np.mod(-carangle1[2],2*np.pi) - np.pi])
+        carangle.append([np.mod(-carangle1[2],2*np.pi) - np.pi]) # car in vrep is oriented 180 degrees in relation to world
         
         # Save odometry position estimate for next car position without diffusion for reference
         xodom[m+1], yodom[m+1], theta[m+1] = vf.predict_motion_xytheta(xodom[m], yodom[m], theta[m], v[m], w[m], dtsim[m])
         
-        # Start fastslam
+        """
+        Fastslam algorithm starts
+        """
                
-        # Sample pose
+        # Sample pose / predict next position
         Xbar = vf.sample_pose(X, v[m], w[m], R, dtsim[m]) # 3XM ([x,y,theta]'XM)
         
-        # Debug getting exact position
-        Xbar2 = np.array([carpos1[0], carpos1[1], np.mod(-carangle1[2],2*np.pi) - np.pi]).reshape(3,1)*np.ones((1,M))
-        debug[m] = Xbar
-        debug2[m] = Xbar2
-        debug3[m] = Xbar2-Xbar
+        # Debug robot position
+#        Xbar2 = np.array([carpos1[0], carpos1[1], np.mod(-carangle1[2],2*np.pi) - np.pi]).reshape(3,1)*np.ones((1,M))
+#        debug[m] = Xbar
+#        debug2[m] = Xbar2
+#        debug3[m] = Xbar2-Xbar
+        
         # if feature observed
         if (detection_state):
             
@@ -277,33 +340,30 @@ while (time.time() - starttime < totalsimtime):
                 feature_index = vf.id_feature(features,detected_object_handle)
                 print('Detected feature: ', feature_index, '(new)') 
                 
-                # Create an arrow object
-                arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))
+                # Create an arrow object between robot and detected feature and add to list for later plotting
+                arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))                
                 
-                
-                # Add feature to feature list
+                # Add feature to observed feature list
                 observed_objects.append(detected_object_handle)
                 
-                # Save the index of the feature
+                # Save the index of the feature for reference
                 k = observed_objects.index(detected_object_handle) # get index of the already observed object
                 
-                # Calculate range and angle to feature related to each particle in the particle set
-                # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
+                # Re-organize vector containing detected feature position x,y related to robot reference frame
                 observed_objects_pos = np.asarray(detected_pointxy[0:2]).reshape(2,1) #2X1
 
+                # Get range and angle from x,y detected feature in relation to robot reference frame 
                 z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM
+
+#               # Debug info               
 #                featpos[feature_index-1]
 #                carpos1
 #                Xbar[:,1]
 #                detected_pointxy
-
-#                if k ==2:
-#                    while(True):
-#                        error_code2 = vrep.simxSetJointTargetVelocity(clientID,h_motor_left,0,vrep.simx_opmode_streaming)       
-#                        error_code2 = vrep.simxSetJointTargetVelocity(clientID,h_motor_right,0,vrep.simx_opmode_streaming)
-#                        print(k)
                         
-                # Initialize mean x,y position of feature based on range and angle in z
+                # Initialize mean x,y position of feature in relation to world reference frame
+                # based on range and angle of detected feature in robot reference frame and estimated robot position 
+                # in world coordinates
                 mu_init[0,:,:] = vf.init_mean_from_z(Xbar, z) # 1X2XM
 
                 # Add to list of mean position x,y of features
@@ -312,32 +372,15 @@ while (time.time() - starttime < totalsimtime):
                 else:
                     mu = np.concatenate((mu,mu_init),axis=0) # NX2XM
                                    
-                # calculatione observation model jacobian 
-                H = vf.calculate_measurement_jacobian(Xbar,mu,k) # # MX2X2. Only for this feature 
-                
-                # Make a transpose along the 2x2 dimension for each particle
-                H_T = np.transpose(H,(1,0,2)) # MX2X2
-                
-                # Inverse of jacobian of measurement model 
-                # https://stackoverflow.com/questions/41850712/compute-inverse-of-2d-arrays-along-the-third-axis-in-a-3d-array-without-loops
-                # Hinv = np.linalg.inv(H.T).T
+                # calculatione observation model jacobian for this observed feature
+                H = vf.calculate_measurement_jacobian(Xbar,mu,k) # MX2X2
                 
                 # Make a transpose along the 2x2 dimension for each particle M
-                H_T = np.transpose(H,(0,2,1)) # MX2X2
-                
-                # Invert Q measurement noise matrix
-                # Qinv = np.linalg.inv(Qt) # 2X2
-                
-                # Scale the Q matrix for each particle
-                # indexing with np.newaxis inserts a new 3rd dimension, which we then repeat the
-                # array along, (you can achieve the same effect by indexing with None, see below)
-                # QinvS = np.repeat(Qinv[:, :, np.newaxis], M, axis=2) # 2X2XM
+                H_T = np.transpose(H,(0,2,1)) # MX2X2                
 
-                # Initialize covariance 
+                # Initialize covariance matrix
                 Sigma_init[0,:,:,:]  = np.linalg.inv(H_T @ QtSinv @ H) # 1XMX2X2
-#                Sigma_init[0,:,:,:]  = (H_T @ QtSinv @ H)
-                
-                
+                                
                 # Add to list of sigma covariance of features
                 if k == 0:
                     Sigma = np.copy(Sigma_init) #MX2X2
@@ -350,56 +393,55 @@ while (time.time() - starttime < totalsimtime):
                 # Make the covariance matrix symmetrical
                 Sigma[k,:,:,:] = (Sigma[k,:,:,:] + np.transpose(Sigma[k,:,:,:],(0,2,1)))/2
             
-#            # else if feature has been seen before
+            # else if feature has been seen before
             else:
                 k = observed_objects.index(detected_object_handle)
-                
-                # Calculate range and angle to feature related to each particle in the particle set
-                # observed_objects_pos[:,:1] = np.asarray(detectedPoint[0:2]).reshape(2,1)
-                observed_objects_pos = np.asarray(detected_pointxy[0:2]).reshape(2,1) #2X1
-                z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM                
                 
                 # Report which feature index was detected
                 feature_index = vf.id_feature(features,detected_object_handle)                
                 print('Detected feature: ', feature_index)  
-                
-                # Create an arrow object
+                                
+                # Create an arrow object between robot and detected feature and add to list for later plotting
                 arrows.append(vf.add_arrow_object(m,carpos,featpos,feature_index))
+                
+                # Re-organize vector containing detected feature position x,y related to robot reference frame
+                observed_objects_pos = np.asarray(detected_pointxy[0:2]).reshape(2,1) #2X1
+                
+                # Get range and angle from x,y detected feature in relation to robot reference frame                 
+                z = vf.z_from_detectection(Xbar,observed_objects_pos) # 2XM                
                 
                 # measurement prediction based on particle set X and mean feature position mu
                 zhat = vf.observation_model_zhat(Xbar,mu,k,Qt) # 2XM
+
+                # innovation 2XM (Difference between measured and predicted measurement)
+                nu = (z-zhat) # 2XM
                 
-                # calculate jacobian
+                # correct angle innovation to be within -pi and pi
+                nu[1,:] = ((nu[1,:] + np.pi) % (2*np.pi)) - np.pi
+                
+                # Re-orginize innovation vector for later calculating the Kalman gain
+                nu = np.transpose(nu.reshape(2,M,1),(1,0,2)) # MX2X1
+                
+                # Calculate observation model jacobian
                 H = vf.calculate_measurement_jacobian(Xbar,mu,k) # MX2X2
                 
-                # Make a transpose along the 3x3 dimension for each particle
+                # Make a transpose along the 2x2 dimension for each particle
                 H_T = np.transpose(H,(0,2,1)) # MX2X2     
                 
-                # Measurement covariance (not the same as Qt measurement covariance noise)
+                # Measurement covariance (not the same as Qt measurement covariance noise Qt or the scaled version of Qt: QtS)
                 Q = H @ Sigma[k,:,:,:] @ H_T + QtS # MX2X2
                 
                 # Inverse of measurement covariance
                 Qinv = np.linalg.inv(Q) # MX2X2
                 
                 # Calculate Kalman gain
-                K = Sigma[k,:,:,:] @ H_T @ Qinv # MX3X2
-                
-                # innovation 2XM
-                nu = (z-zhat) # 2XM
-                
-                # correct angle innovation to be within -pi and pi
-                nu[1,:] = ((nu[1,:] + np.pi) % (2*np.pi)) - np.pi
-                debug_ns2M[m] = nu
-                
-                # Add extra row to measurement error for Kalman gain multiplication
-                #zerror = np.concatenate((z,np.zeros((1,M))),axis=0) # 3XM, but I want it MX3X1
-                nu = np.transpose(nu.reshape(2,M,1),(1,0,2)) # MX2X1
-
-                
-                # update mean. Is this really correct??? mixing coordinates? features x,y. nu is in r,theta. Kalman gain ???.
+                K = Sigma[k,:,:,:] @ H_T @ Qinv # MX2X2
+                                
+                # update mean based on Kalman gain. 
+                # mixing coordinates? features x,y. innovation nu is in r,theta. 
                 mu[k,:,:] = mu[k,:,:] + (K @ nu).T # NX2XM # think about changing to NXMX2X1
                 
-                # update covariance
+                # update covariance based on Kalman gain
                 Sigma[k,:,:,:] = (I - K@H) @ Sigma[k,:,:,:]# NXMX2X2
                 
                 # Make the covariance matrix symmetrical
@@ -426,21 +468,16 @@ while (time.time() - starttime < totalsimtime):
         # if no feature was detected or for the features that were not detected 
         else:  
             # mean and covariance the same as earlier time step
-#            mu = mu
-#            Sigma = Sigma
             
-            # Create a dummy arrow
+            # Create a dummy arrow for plot purposes and add to list
             arrows.append(vf.add_arrow_object(m,np.zeros((ns,3)),np.zeros((10,3)),0))
                        
-        # Resampling  
-        
-        # Debug
-#        X = np.copy(Xbar)
+        # Resampling  of particles
         
         # Re-initialize the particles
         X = np.zeros((3,M))
              
-        # systematic resampling
+        # Systematic resampling
         cdf = np.cumsum(weights)
         rval = np.asscalar(np.random.rand(1)) / M # uniform distributed random value between 0 and 1/M
         
@@ -456,41 +493,48 @@ while (time.time() - starttime < totalsimtime):
             # increment the randomly selected value
             rval = rval + 1/M
             
-        # Re-initialize the weights
+        # Re-initialize the weights for next increment
         weights = 1/M*np.ones((1,M))
-            
-        
-        # save data for plotting
+                   
+        # save particle data into list for plot purposes
         particles_xpos.append(X[0,:].tolist())
         particles_ypos.append(X[1,:].tolist())
         particles_theta.append(X[2,:].tolist())
         
-        # take the average of the mu for each landmark
+        # Save the average mean position of each landmark given by all particles into list
+        # for plot purposes
         mu_mean = np.mean(mu,axis=2)
         xmu_mean.append(mu_mean[:,0].tolist())
         ymu_mean.append(mu_mean[:,1].tolist())
         
-#        # take the average of the robot position
-#        X_mean = np.mean(X,axis=1)
-#        xpos_mean.append(X_mean[0].tolist())
-#        ypos_mean.append(X_mean[1].tolist())
-#        theta_mean.append(X_mean[2].tolist())
-#        
-#        Sigma_mean_iter = np.mean(Sigma,axis=1)
-#        Sigma_mean.append(Sigma_mean_iter.tolist())
+        # Add covariance ellipse object
+        ellipses.append(vf.add_ellipse_object(Sigma, mu))
+        
+        # Save the average particle position into list for plot purposes
+        X_mean = np.mean(X,axis=1)
+        xpos_mean.append(X_mean[0].tolist())
+        ypos_mean.append(X_mean[1].tolist())
+        theta_mean.append(X_mean[2].tolist())
+
+        # Save the average covariance matrix into list for plot purposes        
+        Sigma_mean_iter = np.mean(Sigma,axis=1)
+        Sigma_mean.append(Sigma_mean_iter.tolist())
 
         # Before ending loop, increment iteration 
         m = m + 1
 
-# plot true path and map features
+        
+# End of simulation run and data capture
+print('-------------------------------------')
+print('End of simulation run and data capture')
+print('-------------------------------------')
 time.sleep(0.2)
 
-t = np.asarray(timevector)
-t = t - t[0]
-carpos = np.asarray(carpos)
-xtrue = carpos[:,0]
-ytrue = carpos[:,1]
+"""
+Start with postprocessing and plotting
+"""
 
+# Initialize plot that will contain robot path and map features
 fig, ax = plt.subplots()
 pltmngr = plt.get_current_fig_manager()
 pltmngr.window.setGeometry(50,100,640, 545)
@@ -500,17 +544,22 @@ ax.grid(True)
 plt.title('Simulated world',**csfont)
 plt.ylabel('y',**hfont)
 plt.xlabel('x',**hfont)
-xdata, ydata = [], []
-xdata2, ydata2 = [], []
-xdata3, ydata3 = [], []
-xdata4, ydata4 = [], []
+
+# initialize data points in plot
+xdata, ydata = [], [] # true car position
+xdata2, ydata2 = [], [] # odometry information
+xdata3, ydata3 = [], [] # particle x,y information
+xdata4, ydata4 = [], [] # # landmark mean information
 line, = plt.plot([], [], 'ro', animated=True) # true car position
 line2, = plt.plot([], [], 'g*', animated=True) # odometry information
-line3, = plt.plot([], [], 'b+', animated=True) # particle information
-line4, = plt.plot([], [], 'm*', animated=True) # landmark mean information for one particle
+line3, = plt.plot([], [], 'b+', animated=True) # particle x,y information
+line4, = plt.plot([], [], 'm*', animated=True) # landmark mean information
 
-
-
+# Legend
+red_patch = mpatches.Patch(color='red', label='exact car position')
+green_patch = mpatches.Patch(color='green', label='odometry information')
+blue_patch = mpatches.Patch(color='blue', label='particles')
+plt.legend(handles=[red_patch, green_patch , blue_patch])
 #b : blue.
 #g : green.
 #r : red.
@@ -519,24 +568,19 @@ line4, = plt.plot([], [], 'm*', animated=True) # landmark mean information for o
 #y : yellow.
 #k : black.
 #w : white.
-red_patch = mpatches.Patch(color='red', label='exact car position')
-green_patch = mpatches.Patch(color='green', label='odometry information')
-blue_patch = mpatches.Patch(color='blue', label='particles')
-plt.legend(handles=[red_patch, green_patch , blue_patch])
 
-# plot landmarks
+## plot features as rectangles
 featwidth = 0.2
 featheight = 0.2
-#plt.plot(featpos[0,0],featpos[0,1],'m*',featpos[1,0],featpos[1,1],'m*',featpos[2,0],featpos[2,1],'m*',featpos[3,0],featpos[3,1],'m*',featpos[4,0],featpos[4,1],'m*',featpos[5,0],featpos[5,1],'m*',featpos[6,0],featpos[6,1],'m*',featpos[7,0],featpos[7,1],'m*',featpos[8,0],featpos[8,1],'m*')
-r1=mpatches.Rectangle(xy=(featpos[0,0]-featwidth/2,featpos[0,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r2=mpatches.Rectangle(xy=(featpos[1,0]-featwidth/2,featpos[1,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r3=mpatches.Rectangle(xy=(featpos[2,0]-featwidth/2,featpos[2,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r4=mpatches.Rectangle(xy=(featpos[3,0]-featwidth/2,featpos[3,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r5=mpatches.Rectangle(xy=(featpos[4,0]-featwidth/2,featpos[4,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r6=mpatches.Rectangle(xy=(featpos[5,0]-featwidth/2,featpos[5,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r7=mpatches.Rectangle(xy=(featpos[6,0]-featwidth/2,featpos[6,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r8=mpatches.Rectangle(xy=(featpos[7,0]-featwidth/2,featpos[7,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
-r9=mpatches.Rectangle(xy=(featpos[8,0]-featwidth/2,featpos[8,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='black')
+r1=mpatches.Rectangle(xy=(featpos[0,0]-featwidth/2,featpos[0,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r2=mpatches.Rectangle(xy=(featpos[1,0]-featwidth/2,featpos[1,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r3=mpatches.Rectangle(xy=(featpos[2,0]-featwidth/2,featpos[2,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r4=mpatches.Rectangle(xy=(featpos[3,0]-featwidth/2,featpos[3,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r5=mpatches.Rectangle(xy=(featpos[4,0]-featwidth/2,featpos[4,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r6=mpatches.Rectangle(xy=(featpos[5,0]-featwidth/2,featpos[5,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r7=mpatches.Rectangle(xy=(featpos[6,0]-featwidth/2,featpos[6,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r8=mpatches.Rectangle(xy=(featpos[7,0]-featwidth/2,featpos[7,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
+r9=mpatches.Rectangle(xy=(featpos[8,0]-featwidth/2,featpos[8,1]-featheight/2), width=featwidth, height=featheight, angle=0.0, fill=0, color='grey')
 ax.add_patch(r1)
 ax.add_patch(r2)
 ax.add_patch(r3)
@@ -547,6 +591,7 @@ ax.add_patch(r7)
 ax.add_patch(r8)
 ax.add_patch(r9)
 
+# Add labels to features
 def label(xy, text):
     y = xy[1] - 0.3  # shift y-value for label so that it's below the artist
     plt.text(xy[0], y, text, ha="center", family='sans-serif', size=10, color = 'gray')
@@ -560,113 +605,110 @@ label((featpos[6,0],featpos[6,1]),'feat 7')
 label((featpos[7,0],featpos[7,1]),'feat 8')
 label((featpos[8,0],featpos[8,1]),'feat 9')
 
-# Add arrows to plot
+# Time vector
+t = np.asarray(timevector)
+t = t - t[0]
+
+# True car position
+carpos = np.asarray(carpos)
+xtrue = carpos[:,0]
+ytrue = carpos[:,1]
+
+# Add arrows to plot (is this needed? See addition below)
 for elements in arrows:
     elements.set_visible(False) 
     ax.add_artist(elements)
+    
+# Add covariance ellipses to plot
+for time_frames in ellipses:
+    for elements in time_frames:
+        elements.set_visible(False) 
+        ax.add_artist(elements)    
 
-# Init animation plot
+# Init animation of the plot
 def init_animation():
 # set the axis of the plot    
     ax.set_xlim(-3, 3)
     ax.set_ylim(-3, 3)
     return line, 
 
-# data to use
-def update_animation(frame):
-#    xdata.append(xtrue[frame])
-#    ydata.append(ytrue[frame])
-#    xdata2.append(xodom[frame])
-#    ydata2.append(yodom[frame]) 
-    xdata = xtrue[frame]
-    ydata = ytrue[frame]
-    xdata2 = xodom[frame]
-    ydata2 = yodom[frame]
-    xdata3 = particles_xpos[frame]
-    ydata3 = particles_ypos[frame]
+# data to use in animation
+def update_animation(timeframe):
+    # if one wants to keep the plotted data
+    # xdata.append(xtrue[timeframe])
+    # ydata.append(ytrue[timeframe])
+    # xdata2.append(xodom[timeframe])
+    # ydata2.append(yodom[timeframe]) 
+
+    # Add true robot position to plot   
+    xdata = xtrue[timeframe] 
+    ydata = ytrue[timeframe]
+    line.set_data(xdata, ydata)
     
+    # Add odometry position to plot 
+    xdata2 = xodom[timeframe] 
+    ydata2 = yodom[timeframe]
+    line2.set_data(xdata2, ydata2) 
+    
+    # Add all particle positions to plot     
+    xdata3 = particles_xpos[timeframe] 
+    ydata3 = particles_ypos[timeframe]
+    line3.set_data(xdata3, ydata3)
+
+    # Add mean position of features
     try:    
-        if all(xmu_mean[:frame]):
-            xdata4 = xmu_mean[frame]
-            ydata4 = ymu_mean[frame]   
+        if all(xmu_mean[:timeframe]): # There is typically no any observed features from start
+            xdata4 = xmu_mean[timeframe]    
+            ydata4 = ymu_mean[timeframe]   
             line4.set_data(xdata4, ydata4)
     except:
         pass
-    
-    line.set_data(xdata, ydata)
-    line2.set_data(xdata2, ydata2)   
-    line3.set_data(xdata3, ydata3)
-    
+        
     # Add arrows
     for elements in arrows:
         elements.set_visible(False)    
-    
-    if sensed_obj_true[frame]:
-        arrows[frame].set_visible(True)
-    
-    return line, line2, line3, line4, arrows[frame]
 
-anim = animation.FuncAnimation(fig, update_animation, interval=200, frames=ns, init_func=init_animation, blit=True)
+    # Only show the present observed arrow visible    
+    if sensed_obj_true[timeframe]:
+        arrows[timeframe].set_visible(True)
+
+    # List of objects to plot
+    objects_to_plot = [line, line2, line3, line4, arrows[timeframe]]
+
+    # Add ellipses
+    for time_frames in ellipses:
+        for elements in time_frames:
+            elements.set_visible(False)    
+
+    # Only show valid ellipses for each time frame
+    ellipses_inframe = ellipses[timeframe]
+    try:    
+        if all(ellipses_inframe): # There is typically no any observed features from start
+            for elements in ellipses_inframe:
+                elements.set_visible(True)            
+                objects_to_plot.append(elements)
+    except:
+        pass
+    
+    # Return the elements that should be added to the plot (No list inside the list are allowed!)
+    return objects_to_plot
+#    return line, line2, line3, line4, arrows[timeframe]
+
+# Setup of animation, frames, framerate etc 
+anim = animation.FuncAnimation(fig, update_animation, interval=200, frames=ns-1, init_func=init_animation, blit=True)
 
 # to save the file as an animation, one needs ffmpeg. Anaconda: conda install -c conda-forge ffmpeg
 Writer = animation.writers['ffmpeg']
 writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
 anim.save('basic_animation.mp4', writer=writer)
 
-
-
-# Arrow
-#a1 = mpatches.Arrow(x = -1, y=1, dx=1, dy=2, width=0.2)
-#ax.add_patch(a1)
-
+# Start plotting the animation
 plt.show()
 
-#from datetime import datetime
-#from matplotlib import pyplot
-#from matplotlib.animation import FuncAnimation
-#from random import randrange
-#
-#x_data, y_data = [], []
-#
-#figure = pyplot.figure()
-#line, = pyplot.plot_date(x_data, y_data, '-')
-#
-#def update(frame):
-#    x_data.append(datetime.now())
-#    y_data.append(randrange(0, 100))
-#    line.set_data(x_data, y_data)
-#    figure.gca().relim()
-#    figure.gca().autoscale_view()
-#    return line,
-#
-#animation = FuncAnimation(figure, update, interval=200)
-#
-#pyplot.show()
 """
-continue with fastslam algorithm for feature never seen before
-think about time vector for particles or how to plot each time sample, otherwise difficult to problem solve
+OLD STUFF, camera image etc
 """
-
-"""
-OLD STUFF
-"""
-# Odometry
-#dtheta_L = np.zeros((ns,1))
-#dtheta_R = np.zeros((ns,1))
-#w_R = np.zeros((ns,1))
-#w_L = np.zeros((ns,1))
-#        dtheta_R[m] = theta_R2 - theta_R1
-#        dtheta_L[m] = theta_L2 - theta_L1
-#        w_R[m] = dtheta_R[m] / dtsim[m]
-#        w_L[m] = dtheta_L[m] / dtsim[m]
-#        w[m] = CALIB_ODOM * (w_R[m]*R_R - w_L[m]*R_L) / B
-#        v[m] = (w_R[m]*R_R + w_L[m]*R_L) / 2
-
-
-        # save odometry information for plotting (motion model from thrun p.127, non-working)
-#        xodom2[m+1] = xodom2[m] - (v[m]/(w[m] + 1e-9)) * np.sin(theta[m]) + (v[m]/(w[m] + 1e-9)) * np.sin(theta[m] + w[m]*dtsim[m])
-#        yodom2[m+1] = yodom2[m] + (v[m]/(w[m] + 1e-9)) * np.cos(theta[m]) - (v[m]/(w[m] + 1e-9)) * np.cos(theta[m] + w[m]*dtsim[m])
-               
+          
 # Get camera image and plot it
 #error_code, resolution, car_image = vrep.simxGetVisionSensorImage(clientID, h_car_cam, 0, vrep.simx_opmode_buffer)
 #time.sleep(0.2)
