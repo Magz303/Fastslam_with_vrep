@@ -69,11 +69,8 @@ Here the user can define the particles, model noise parameters and simulation ti
 totalsimtime = 20 # Time to capture data and run simulation
 sampletime = 2.5e-1 # Sample time of the simulation
 
-# Initialize particles, number and starting position
-M = 50    # Enter number of particles
-xstart = carpos[0][0]
-ystart = carpos[0][1]
-thetastart = carangle[0]
+# Initialize number of particles
+M = 100    # Enter number of particles
 
 # Initialize process noise covariance matricies
 stddev_x = 0.01 # Enter standard deviation
@@ -183,6 +180,11 @@ Pre-simulation initialization
 # close all open plot windows 
 plt.close("all")
 
+# Enter starting position of the particles
+xstart = carpos[0][0]
+ystart = carpos[0][1]
+thetastart = carangle[0]
+
 # time initialization
 starttime=time.time()
 time1 = starttime
@@ -194,6 +196,11 @@ ns = int(totalsimtime/sampletime)
 # Setup vectors for particles, features etc
 Xstart = np.array([xstart, ystart, thetastart]) # Assumed particle start position
 X = np.repeat(Xstart[:, np.newaxis], M, axis=1) # Set of particles 
+stddev_diffusion = 0.1 # Initialize the particle starting point with defined std diffusion
+diffusion_normal = np.random.standard_normal((3,M))  # Normal distribution with standard deviation 1 
+diffusion = diffusion_normal * stddev_diffusion # Normal distribution with set standard deviation 
+X = X + diffusion #  Add diffusion to starting pose of particles
+    
 particles_xpos = [X[0,:].tolist()]
 particles_ypos = [X[1,:].tolist()]
 particles_theta = [X[1,:].tolist()]
@@ -608,11 +615,15 @@ def init_animation():
 
 # data to use in animation
 def update_animation(timeframe):
-    # if one wants to keep the plotted data
-    # xdata.append(xtrue[timeframe])
-    # ydata.append(ytrue[timeframe])
-    # xdata2.append(xodom[timeframe])
-    # ydata2.append(yodom[timeframe]) 
+     # if one wants to keep the plotted data
+#     xdata.append(xtrue[timeframe])
+#     ydata.append(ytrue[timeframe])
+#     xdata2.append(xodom[timeframe])
+#     ydata2.append(yodom[timeframe]) 
+#     line.set_data(xdata, ydata)
+#     line2.set_data(xdata2, ydata2)
+#     objects_to_plot = [line, line2]
+#     return objects_to_plot
 
     # Add true robot position to plot   
     xdata = xtrue[timeframe] 
@@ -664,9 +675,8 @@ def update_animation(timeframe):
     except:
         pass
     
-    # Return the elements that should be added to the plot (No list inside the list are allowed!)
+    # Return the elements that should be added to the plot
     return objects_to_plot
-#    return line, line2, line3, line4, arrows[timeframe]
 
 # Setup of animation, frames, framerate etc 
 anim = animation.FuncAnimation(fig, update_animation, interval=200, frames=ns-1, init_func=init_animation, blit=True)
